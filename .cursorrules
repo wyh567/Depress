@@ -1,0 +1,35 @@
+# .cursorrules — DePress Project
+
+## Context Protocol
+- Read `architecture.md` and `process.md` BEFORE any task. They are the source of truth.
+- Only work on the current Phase in `process.md`. Refuse scope creep; note out-of-phase ideas in the "Backlog" section instead of implementing.
+- After completing a TODO item, update `process.md` (check the box, bump Last Updated). Do this in the same session.
+
+## Output Discipline (token economy)
+- No apologies, no preamble, no summaries of what you just did unless asked.
+- For multi-file changes: output a numbered plan (≤10 lines) first, wait for approval only if the change touches >3 files or any file in `packages/ast`.
+- When editing a file, output only the diff/changed sections, never re-print unchanged code.
+- Never re-explain the architecture; reference `architecture.md` section numbers instead.
+
+## Code Standards
+- TypeScript strict mode; `noUncheckedIndexedAccess: true`. Never use `any`; use `unknown` + narrowing.
+- All cross-boundary data (editor↔API↔worker) MUST be validated with Zod schemas from `packages/ast`. Never define duplicate types locally.
+- Components: functional, ≤150 lines; extract hooks for logic. One component per file.
+- No inline styles for document content — the editor is style-less by design (Invariant #1).
+- Transformers (`packages/transformers`) must be pure functions with snapshot tests; no I/O inside.
+- API routes: Fastify with typed schemas; workers never share memory with API.
+- Naming: kebab-case files, PascalCase components, camelCase functions.
+
+## Hard Invariants (from architecture.md §5 — violating these is a bug)
+1. No font-size/color/spacing controls or nodes in the editor schema.
+2. Citations stored as `citeKey` only; rendering happens at compile time.
+3. `packages/ast` is the single type source of truth.
+4. Compilation is sandboxed and async, always.
+
+## Testing
+- New transformer logic → snapshot test required in same PR.
+- Zod schema change → update tests + both consumers (web, api) in same change.
+
+## When Uncertain
+- If a requirement is ambiguous, ask ONE concise question instead of guessing.
+- If a library API might have changed post-training, say so and check docs rather than hallucinating.

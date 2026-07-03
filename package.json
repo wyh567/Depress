@@ -1,0 +1,25 @@
+{
+  "name": "depress",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "eslint": "^9.30.0",
+    "prettier": "^3.6.0",
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.35.0"
+  }
+}
