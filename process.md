@@ -43,7 +43,7 @@ Goal: Deployable portfolio product.
 - [x] Init monorepo (pnpm, turbo, tsconfig strict, eslint, prettier)
 - [x] `packages/ast`: node types + Zod schemas + unit tests
   - 硬性要求(Invariant #3 载体):① node type 区分必须用 `z.discriminatedUnion`,禁用 `z.union`;② TS 类型一律 `z.infer` 从 schema 导出,禁止手写 interface 双份维护;③ 测试必须含拒绝非法输入用例(heading level 4、citation 缺 citeKey 等)
-- [ ] Next.js app scaffold + layout shell
+- [x] Next.js app scaffold + layout shell
 - [ ] Tiptap setup with custom restricted schema (decide: keep semantic bold/italic, forbid font/size/color)
 - [ ] Citation inline node + insertion command (Cmd+Shift+C)
 - [ ] Reference library panel (in-memory) + BibTeX importer
