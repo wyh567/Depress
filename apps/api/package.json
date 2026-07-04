@@ -1,0 +1,22 @@
+{
+  "name": "@depress/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/app.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@depress/ast": "workspace:*",
+    "fastify": "^5.4.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.0"
+  }
+}

@@ -53,7 +53,7 @@ Goal: Deployable portfolio product.
 ## Phase 2 TODO
 - [x] `ast-to-typst` transformer with snapshot tests (`packages/transformers`; `astToTypst(unknown)` 内部 parseDoc 校验，citation → `#cite(<citeKey>)` 占位)
 - [x] IEEE template in Typst; parameterized injection points (`@depress/templates` 内置 immutable IEEE_TEMPLATE，仅 {{TITLE}}/{{BODY}} 内容注入点；`renderIeeeTypstDocument(unknown)` 文本级 snapshot，无用户样式参数；title 暂用内部占位 "DePress Draft"，待 AST metadata)
-- [ ] Fastify API: POST /compile, GET /jobs/:id
+- [x] Fastify API: POST /compile, GET /jobs/:id（`apps/api` `buildApp()` 不 listen、inject 可测；`createJobStore()` 每 app 实例内存 job，仅 `queued`；contract 全 Zod：ast=DocSchema、templateId=`"ieee"`、format=`"pdf"`，400 返回 issues，404 `JOB_NOT_FOUND`；无 transformer/Typst/artifact）
 - [ ] BullMQ worker + Dockerized Typst sandbox
 - [ ] S3 artifact storage + signed URLs
 
