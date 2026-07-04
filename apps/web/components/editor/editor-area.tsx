@@ -4,6 +4,7 @@ import { EditorContent } from "@tiptap/react";
 import { useCallback, useState } from "react";
 import { useReferenceLibrary } from "@/stores/reference-library";
 import { CitationPrompt } from "./citation-prompt";
+import { ExportAstButton } from "./export-ast-button";
 import { useDepressEditor } from "./use-depress-editor";
 
 export function EditorArea() {
@@ -30,9 +31,10 @@ export function EditorArea() {
 
   return (
     <main className="flex min-h-0 flex-col bg-white">
-      <h2 className="border-b border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700">
-        编辑区
-      </h2>
+      <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+        <h2 className="text-sm font-semibold text-gray-700">编辑区</h2>
+        <ExportAstButton getEditorJson={() => editor?.getJSON()} />
+      </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <EditorContent
           editor={editor}

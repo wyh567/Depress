@@ -1,8 +1,8 @@
 # PROCESS.md — MVP Roadmap & State
 
 ## Status
-- Current Phase: **1**
-- Last Updated: 2026-07-03
+- Current Phase: **2**
+- Last Updated: 2026-07-04
 
 ## Phase 1 — Editor Core & AST Contract
 Goal: A working structured editor that emits validated AST JSON. No backend yet.
@@ -47,8 +47,8 @@ Goal: Deployable portfolio product.
 - [x] Tiptap setup with custom restricted schema (decided: keep semantic bold/italic, forbid font/size/color)
 - [x] Citation inline node + insertion command (Cmd+Shift+C)
 - [x] Reference library panel (in-memory) + BibTeX importer
-- [ ] "Export AST" debug button + Zod validation
-- [ ] Update process.md status when done
+- [x] "Export AST" debug button + Zod validation
+- [x] Update process.md status when done
 
 ## Backlog
 (Out-of-phase ideas go here — do not implement early.)

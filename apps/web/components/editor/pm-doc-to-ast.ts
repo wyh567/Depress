@@ -54,7 +54,9 @@ export function pmDocToAst(json: unknown): Doc {
   };
   const result = parseDoc(candidate);
   if (!result.success) {
-    throw new Error(`编辑器输出未通过 AST 校验: ${result.error.message}`);
+    throw new Error(`编辑器输出未通过 AST 校验: ${result.error.message}`, {
+      cause: result.error,
+    });
   }
   return result.data;
 }
