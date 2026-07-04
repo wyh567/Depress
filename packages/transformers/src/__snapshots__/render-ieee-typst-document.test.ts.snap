@@ -1,0 +1,37 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderIeeeTypstDocument > renders a small paper into the IEEE template (snapshot) 1`] = `
+"// DePress IEEE template (immutable asset — never user-editable)
+#set page(
+  paper: "us-letter",
+  margin: (x: 0.62in, top: 0.75in, bottom: 1in),
+  columns: 2,
+)
+#set columns(gutter: 0.2in)
+#set text(font: "Times New Roman", size: 10pt)
+#set par(justify: true, first-line-indent: 1em)
+#set heading(numbering: "I.A.1)")
+#show heading.where(level: 1): set align(center)
+#show heading.where(level: 1): set text(size: 10pt, weight: "regular")
+#show heading.where(level: 1): upper
+
+#place(
+  top + center,
+  float: true,
+  scope: "parent",
+  clearance: 2em,
+)[
+  #set align(center)
+  #text(size: 24pt)[DePress Draft]
+]
+
+= Introduction
+
+Structured editing is *essential* for _reproducible_ publishing #cite(label("smith2024")).
+
+== Prior Work
+
+See also #cite(label("doe-2023")) for a survey.
+
+"
+`;
