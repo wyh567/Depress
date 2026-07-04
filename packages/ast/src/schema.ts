@@ -19,7 +19,10 @@ export type TextNode = z.infer<typeof TextNodeSchema>;
 // time (Invariant #2).
 export const CitationNodeSchema = z.object({
   type: z.literal("citation"),
-  citeKey: z.string().min(1),
+  citeKey: z
+    .string()
+    .min(1)
+    .refine((s) => s.trim().length > 0, { message: "citeKey 不能为纯空白" }),
 });
 export type CitationNode = z.infer<typeof CitationNodeSchema>;
 

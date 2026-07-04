@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 import { Editor } from "@tiptap/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { depressExtensions } from "./extensions";
+import { createDepressExtensions } from "./extensions";
 import { pmDocToAst } from "./pm-doc-to-ast";
 import { parseDoc } from "@depress/ast";
 
 let editor: Editor;
 
 beforeEach(() => {
-  editor = new Editor({ extensions: depressExtensions });
+  editor = new Editor({ extensions: createDepressExtensions() });
 });
 
 afterEach(() => {
@@ -23,7 +23,7 @@ const collectTypes = (node: unknown, out = new Set<string>()): Set<string> => {
   return out;
 };
 
-const REGISTERED = new Set(["doc", "paragraph", "text", "heading", "bold", "italic"]);
+const REGISTERED = new Set(["doc", "paragraph", "text", "heading", "bold", "italic", "citation"]);
 
 describe("受限 schema:未注册项在数据层被拒绝", () => {
   it("setMark 未注册的 textStyle 无效,JSON 无痕迹", () => {

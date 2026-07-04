@@ -11,7 +11,7 @@ import { MarkSchema, parseDoc, type Doc, type Mark } from "@depress/ast";
 interface PmNode {
   type?: unknown;
   text?: unknown;
-  attrs?: { level?: unknown };
+  attrs?: { level?: unknown; citeKey?: unknown };
   marks?: { type?: unknown }[];
   content?: PmNode[];
 }
@@ -25,6 +25,10 @@ function toInline(node: PmNode): unknown {
   if (node.type === "text") {
     const marks = toMarks(node.marks);
     return { type: "text", text: node.text, ...(marks ? { marks } : {}) };
+  }
+  if (node.type === "citation") {
+    // PM 把 citeKey 放在 attrs;AST 提升到顶层
+    return { type: "citation", citeKey: node.attrs?.citeKey };
   }
   // Unknown inline types pass through untouched; parseDoc rejects them.
   return node;

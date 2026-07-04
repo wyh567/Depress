@@ -1,11 +1,12 @@
 "use client";
 
 import { useEditor } from "@tiptap/react";
-import { depressExtensions } from "./extensions";
+import type { CitationOptions } from "./citation-node";
+import { createDepressExtensions } from "./extensions";
 
-export function useDepressEditor() {
+export function useDepressEditor(citationOptions: CitationOptions = {}) {
   return useEditor({
-    extensions: depressExtensions,
+    extensions: createDepressExtensions(citationOptions),
     immediatelyRender: false,
     editorProps: {
       attributes: {

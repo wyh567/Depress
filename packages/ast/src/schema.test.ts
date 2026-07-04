@@ -47,6 +47,13 @@ describe("DocSchema rejects invalid input", () => {
     ).toBe(false);
   });
 
+  it("rejects citation with whitespace-only citeKey", () => {
+    expect(
+      parseDoc(docWith({ type: "paragraph", content: [{ type: "citation", citeKey: "   " }] }))
+        .success
+    ).toBe(false);
+  });
+
   it("rejects citation with empty citeKey", () => {
     expect(
       parseDoc(docWith({ type: "paragraph", content: [{ type: "citation", citeKey: "" }] }))
