@@ -46,7 +46,7 @@ Goal: Deployable portfolio product.
 - [x] Next.js app scaffold + layout shell
 - [x] Tiptap setup with custom restricted schema (decided: keep semantic bold/italic, forbid font/size/color)
 - [x] Citation inline node + insertion command (Cmd+Shift+C)
-- [ ] Reference library panel (in-memory) + BibTeX importer
+- [x] Reference library panel (in-memory) + BibTeX importer
 - [ ] "Export AST" debug button + Zod validation
 - [ ] Update process.md status when done
 

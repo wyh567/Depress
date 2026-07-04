@@ -157,6 +157,59 @@ describe("默认扩展白名单", () => {
   });
 });
 
+describe("引用库联动(TODO #6)", () => {
+  it("用库条目 item.id 作为 citeKey 插入,全链路 Zod 通过", async () => {
+    const { useReferenceLibrary } = await import("../../stores/reference-library");
+    useReferenceLibrary.getState().clear();
+    useReferenceLibrary.getState().upsert({ id: "lib2024", type: "book", title: "库中书" });
+
+    const item = useReferenceLibrary.getState().items[0];
+    if (!item) throw new Error("expected item");
+    editor.commands.insertCitation({ citeKey: item.id });
+
+    const ast = pmDocToAst(editor.getJSON());
+    expect(parseDoc(ast).success).toBe(true);
+    expect(JSON.stringify(ast)).toContain('"citeKey":"lib2024"');
+  });
+
+  it("删除文献后 chip 实时变 invalid,但 PM JSON/AST/HTML 逐字节不变", async () => {
+    const { useReferenceLibrary } = await import("../../stores/reference-library");
+    const lib = useReferenceLibrary;
+    lib.getState().clear();
+    lib.getState().upsert({ id: "gone2024", type: "book", title: "将被删除" });
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const mounted = new Editor({
+      element: host,
+      extensions: createDepressExtensions({
+        isCitationKnown: (citeKey) => lib.getState().has(citeKey),
+        subscribeCitationValidity: (onChange) => lib.subscribe(onChange),
+      }),
+    });
+    mounted.commands.insertCitation({ citeKey: "gone2024" });
+
+    const chip = host.querySelector('[data-cite-key="gone2024"]');
+    expect(chip?.classList.contains("citation-unknown")).toBe(false);
+
+    const before = {
+      pm: JSON.stringify(mounted.getJSON()),
+      ast: JSON.stringify(pmDocToAst(mounted.getJSON())),
+      html: mounted.getHTML(),
+    };
+
+    lib.getState().remove("gone2024");
+
+    expect(chip?.classList.contains("citation-unknown")).toBe(true);
+    expect(JSON.stringify(mounted.getJSON())).toBe(before.pm);
+    expect(JSON.stringify(pmDocToAst(mounted.getJSON()))).toBe(before.ast);
+    expect(mounted.getHTML()).toBe(before.html);
+
+    mounted.destroy();
+    host.remove();
+  });
+});
+
 describe("invalid 视觉态仅存在于视图层", () => {
   it("未知 citeKey 的 chip 带视觉标记,但 PM JSON / AST / HTML 无痕迹", () => {
     // 挂载 NodeView 需要真实 DOM 容器

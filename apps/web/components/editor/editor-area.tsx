@@ -2,17 +2,22 @@
 
 import { EditorContent } from "@tiptap/react";
 import { useCallback, useState } from "react";
+import { useReferenceLibrary } from "@/stores/reference-library";
 import { CitationPrompt } from "./citation-prompt";
 import { useDepressEditor } from "./use-depress-editor";
-
-// 临时 mock:TODO #6 接入真实引用库后替换
-const MOCK_KNOWN_CITE_KEYS = new Set(["smith2024", "wang2023"]);
 
 export function EditorArea() {
   const [promptOpen, setPromptOpen] = useState(false);
   const editor = useDepressEditor({
     onRequestCitation: useCallback(() => setPromptOpen(true), []),
-    isCitationKnown: useCallback((citeKey: string) => MOCK_KNOWN_CITE_KEYS.has(citeKey), []),
+    isCitationKnown: useCallback(
+      (citeKey: string) => useReferenceLibrary.getState().has(citeKey),
+      []
+    ),
+    subscribeCitationValidity: useCallback(
+      (onChange: () => void) => useReferenceLibrary.subscribe(onChange),
+      []
+    ),
   });
 
   const insertCitation = useCallback(

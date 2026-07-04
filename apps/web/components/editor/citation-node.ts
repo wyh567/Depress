@@ -3,9 +3,12 @@ import { Node, mergeAttributes } from "@tiptap/core";
 export interface CitationOptions {
   // 快捷键只负责发起请求;UI(输入框/库搜索)在扩展外实现
   onRequestCitation?: () => void;
-  // 视图层专用:citeKey 是否存在于引用库。仅影响 chip 外观,
-  // 绝不写入 PM JSON / AST / HTML(#6 接入真实库查询)
+  // 视图层专用:citeKey 是否有效。仅影响 chip 外观,
+  // 绝不写入 PM JSON / AST / HTML
   isCitationKnown?: (citeKey: string) => boolean;
+  // 有效性来源变化时通知 NodeView 重算外观(返回取消订阅函数)。
+  // 通用命名:extension 不感知"引用库"这一业务概念
+  subscribeCitationValidity?: (onChange: () => void) => () => void;
 }
 
 declare module "@tiptap/core" {
@@ -57,12 +60,23 @@ export const Citation = Node.create<CitationOptions>({
       dom.contentEditable = "false";
       dom.className = "citation-chip";
       dom.textContent = `[@${citeKey}]`;
-      if (this.options.isCitationKnown && !this.options.isCitationKnown(citeKey)) {
-        dom.classList.add("citation-unknown");
-        dom.title = "引用库中不存在该文献";
-        dom.setAttribute("aria-label", `未知引用 ${citeKey}`);
-      }
-      return { dom };
+
+      const applyValidity = () => {
+        const unknown =
+          this.options.isCitationKnown !== undefined && !this.options.isCitationKnown(citeKey);
+        dom.classList.toggle("citation-unknown", unknown);
+        if (unknown) {
+          dom.title = "引用库中不存在该文献";
+          dom.setAttribute("aria-label", `未知引用 ${citeKey}`);
+        } else {
+          dom.removeAttribute("title");
+          dom.removeAttribute("aria-label");
+        }
+      };
+      applyValidity();
+      const unsubscribe = this.options.subscribeCitationValidity?.(applyValidity);
+
+      return { dom, destroy: () => unsubscribe?.() };
     };
   },
 
