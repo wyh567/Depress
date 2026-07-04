@@ -2,7 +2,7 @@
 
 ## Status
 - Current Phase: **2**
-- Last Updated: 2026-07-04
+- Last Updated: 2026-07-05
 
 ## Phase 1 — Editor Core & AST Contract
 Goal: A working structured editor that emits validated AST JSON. No backend yet.
@@ -49,6 +49,13 @@ Goal: Deployable portfolio product.
 - [x] Reference library panel (in-memory) + BibTeX importer
 - [x] "Export AST" debug button + Zod validation
 - [x] Update process.md status when done
+
+## Phase 2 TODO
+- [x] `ast-to-typst` transformer with snapshot tests (`packages/transformers`; `astToTypst(unknown)` 内部 parseDoc 校验，citation → `#cite(<citeKey>)` 占位)
+- [ ] IEEE template in Typst; parameterized injection points
+- [ ] Fastify API: POST /compile, GET /jobs/:id
+- [ ] BullMQ worker + Dockerized Typst sandbox
+- [ ] S3 artifact storage + signed URLs
 
 ## Backlog
 (Out-of-phase ideas go here — do not implement early.)

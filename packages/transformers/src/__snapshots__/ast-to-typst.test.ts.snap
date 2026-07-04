@@ -1,0 +1,51 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`astToTypst — citations > keeps mixed text + citation + text stable 1`] = `
+"As shown by #cite(label("smith2024")) and later confirmed #cite(label("lee2025")), the effect is robust.
+"
+`;
+
+exports[`astToTypst — full sample paper > transforms a small paper 1`] = `
+"= A Study of Structured Authoring
+
+Decoupling content from layout improves reproducibility #cite(label("knuth1984")).
+
+== Methods
+
+We evaluated _E. coli_ samples under *strict* conditions (n=42, p\\<0.05) #cite(label("smith2024"))#cite(label("lee2025")).
+
+// TODO(figure): stub — fleshed out in a later phase
+
+== Results & Discussion
+
+// TODO(table): stub — fleshed out in a later phase
+
+The results confirm prior findings.
+"
+`;
+
+exports[`astToTypst — headings > maps heading levels 1/2/3 to =/==/=== 1`] = `
+"= Introduction
+
+== Background
+
+=== Prior Work
+"
+`;
+
+exports[`astToTypst — paragraphs and marks > escapes Typst special characters in text 1`] = `
+"50% of \\*raw\\* \\_text\\_ with \\#let, \\$x\\$, \\@ref, \\[brackets\\], a\\\\b, \\<tag\\>, \\~, \\/ and \\-
+"
+`;
+
+exports[`astToTypst — paragraphs and marks > maps text, bold, italic, and bold+italic 1`] = `
+"Plain, *bold*, _italic_, and *_both_*.
+"
+`;
+
+exports[`astToTypst — stubs > renders figure/table stubs as comments 1`] = `
+"// TODO(figure): stub — fleshed out in a later phase
+
+// TODO(table): stub — fleshed out in a later phase
+"
+`;
