@@ -57,5 +57,8 @@ Goal: Deployable portfolio product.
 - [x] BullMQ worker + Dockerized Typst sandbox（`CompileQueue` 接口注入 `buildApp`，POST /compile 仅 enqueue（失败 503 QUEUE_UNAVAILABLE）；BullMQ producer/worker 懒加载 bullmq@^5.79，单测不碰 Redis；`processCompileJob(unknown)` 重新 Zod 校验 → `renderIeeeTypstDocument` → 注入式 sandbox，错误只回安全码 INVALID_AST/COMPILE_FAILED；Docker sandbox：`ghcr.io/typst/typst:0.15.0`、--network none/--read-only/--cap-drop ALL/mem/cpu/pids limit、mkdtemp 工作目录 finally 清理；真实 Docker smoke test 由 DEPRESS_DOCKER_SMOKE=1 门控；无 artifact/S3/signedUrl）
 - [x] S3 artifact storage + signed URLs（Job contract 迁入 `@depress/ast`（Invariant #3）：`JobResponseSchema` 改 `z.discriminatedUnion`+`.strict()`，`downloadUrl` 仅 succeeded、`error` 仅 failed（安全码 INVALID_AST/COMPILE_FAILED/UPLOAD_FAILED/QUEUE_UNAVAILABLE），含负例测试；`apps/api/src/services/s3.ts`：AWS SDK v3，模块 init 时 Zod 校验 S3_BUCKET/REGION/KEYS fail-fast，client/presigner 可注入；worker 上传 `artifacts/{jobId}.pdf` 独立 try-catch → UPLOAD_FAILED，sandbox finally 清理不受影响（有测试证明）；GET /jobs/:id 读时现签 URL（固定 15min TTL，不持久化）；Vitest 全 mock S3，无真实 AWS）
 
+- [ ] Round-trip 接线（Phase 2 退出标准所需基建，非 Phase 4 部署）：`apps/api/src/server.ts` 入口（buildApp + BullMQ producer + S3 signer 接线，S3 fail-fast 在此触发）+ worker 入口脚本（startCompileWorker，job 状态回读方案：API 直查 BullMQ job state 或最小共享方案，二选一需决策）+ `docker-compose`（Redis + MinIO）+ web 端导出按钮（POST /compile → 轮询 GET /jobs/:id → downloadUrl 下载）
+- **Exit criteria 验收**: 编辑器打字 → 下载 IEEE PDF 全链路跑通后，Phase 2 才算关闭
+
 ## Backlog
 (Out-of-phase ideas go here — do not implement early.)
