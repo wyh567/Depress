@@ -1,16 +1,34 @@
 import { renderIeeeTypstDocument } from "@depress/transformers";
+import type { JobFailureCode } from "@depress/ast";
 import { CompileJobPayloadSchema } from "../queue/compile-queue";
 import type { TypstSandboxRunner } from "./typst-sandbox";
 
-// Worker-side result contract. Deliberately no artifactUrl/signedUrl — the
-// PDF stays local to the worker until the S3 TODO. Errors carry only safe,
-// enum-like codes; never raw compiler output or Zod internals.
+// Worker-side result contract. The succeeded outcome carries the S3 object
+// key only — signed URLs are generated on read by GET /jobs/:id, never here.
+// Errors carry only safe, enum-like codes; never raw compiler/S3 output.
 export type CompileJobOutcome =
-  | { status: "succeeded"; pdfByteLength: number }
-  | { status: "failed"; error: "INVALID_AST" | "COMPILE_FAILED" };
+  | { status: "succeeded"; artifactKey: string; pdfByteLength: number }
+  | {
+      status: "failed";
+      error: Extract<
+        JobFailureCode,
+        "INVALID_AST" | "COMPILE_FAILED" | "UPLOAD_FAILED"
+      >;
+    };
+
+// Storage seam — the S3 service satisfies this; tests inject a fake so no
+// AWS traffic ever occurs in unit tests.
+export interface ArtifactUploader {
+  uploadArtifact(key: string, pdf: Buffer): Promise<void>;
+}
 
 export interface CompileProcessorDeps {
   sandbox: TypstSandboxRunner;
+  artifacts: ArtifactUploader;
+}
+
+export function artifactKeyForJob(jobId: string): string {
+  return `artifacts/${jobId}.pdf`;
 }
 
 // Pure orchestration, injectable sandbox — unit-testable without Docker or
@@ -35,10 +53,22 @@ export async function processCompileJob(
     return { status: "failed", error: "INVALID_AST" };
   }
 
+  // Sandbox tmp-dir cleanup lives in the sandbox's own finally block
+  // (typst-sandbox.ts) and runs regardless of what happens after compile —
+  // including an upload failure below.
+  let pdf: Buffer;
   try {
-    const pdf = await deps.sandbox.compile(typstSource);
-    return { status: "succeeded", pdfByteLength: pdf.byteLength };
+    pdf = await deps.sandbox.compile(typstSource);
   } catch {
     return { status: "failed", error: "COMPILE_FAILED" };
   }
+
+  const artifactKey = artifactKeyForJob(parsed.data.jobId);
+  try {
+    await deps.artifacts.uploadArtifact(artifactKey, pdf);
+  } catch {
+    return { status: "failed", error: "UPLOAD_FAILED" };
+  }
+
+  return { status: "succeeded", artifactKey, pdfByteLength: pdf.byteLength };
 }

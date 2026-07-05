@@ -55,7 +55,7 @@ Goal: Deployable portfolio product.
 - [x] IEEE template in Typst; parameterized injection points (`@depress/templates` 内置 immutable IEEE_TEMPLATE，仅 {{TITLE}}/{{BODY}} 内容注入点；`renderIeeeTypstDocument(unknown)` 文本级 snapshot，无用户样式参数；title 暂用内部占位 "DePress Draft"，待 AST metadata)
 - [x] Fastify API: POST /compile, GET /jobs/:id（`apps/api` `buildApp()` 不 listen、inject 可测；`createJobStore()` 每 app 实例内存 job，仅 `queued`；contract 全 Zod：ast=DocSchema、templateId=`"ieee"`、format=`"pdf"`，400 返回 issues，404 `JOB_NOT_FOUND`；无 transformer/Typst/artifact）
 - [x] BullMQ worker + Dockerized Typst sandbox（`CompileQueue` 接口注入 `buildApp`，POST /compile 仅 enqueue（失败 503 QUEUE_UNAVAILABLE）；BullMQ producer/worker 懒加载 bullmq@^5.79，单测不碰 Redis；`processCompileJob(unknown)` 重新 Zod 校验 → `renderIeeeTypstDocument` → 注入式 sandbox，错误只回安全码 INVALID_AST/COMPILE_FAILED；Docker sandbox：`ghcr.io/typst/typst:0.15.0`、--network none/--read-only/--cap-drop ALL/mem/cpu/pids limit、mkdtemp 工作目录 finally 清理；真实 Docker smoke test 由 DEPRESS_DOCKER_SMOKE=1 门控；无 artifact/S3/signedUrl）
-- [ ] S3 artifact storage + signed URLs
+- [x] S3 artifact storage + signed URLs（Job contract 迁入 `@depress/ast`（Invariant #3）：`JobResponseSchema` 改 `z.discriminatedUnion`+`.strict()`，`downloadUrl` 仅 succeeded、`error` 仅 failed（安全码 INVALID_AST/COMPILE_FAILED/UPLOAD_FAILED/QUEUE_UNAVAILABLE），含负例测试；`apps/api/src/services/s3.ts`：AWS SDK v3，模块 init 时 Zod 校验 S3_BUCKET/REGION/KEYS fail-fast，client/presigner 可注入；worker 上传 `artifacts/{jobId}.pdf` 独立 try-catch → UPLOAD_FAILED，sandbox finally 清理不受影响（有测试证明）；GET /jobs/:id 读时现签 URL（固定 15min TTL，不持久化）；Vitest 全 mock S3，无真实 AWS）
 
 ## Backlog
 (Out-of-phase ideas go here — do not implement early.)

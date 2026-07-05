@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app";
 import { CompileResponseSchema, JobResponseSchema } from "./contracts";
+import { createJobStore } from "./services/job-store";
 
 const validAst = {
   type: "doc",
@@ -99,6 +100,89 @@ describe("GET /jobs/:id", () => {
     const res = await app.inject({ method: "GET", url: "/jobs/nope" });
     expect(res.statusCode).toBe(404);
     expect(res.json()).toEqual({ error: "JOB_NOT_FOUND" });
+  });
+
+  it("never includes downloadUrl while a job is queued", async () => {
+    const app = buildApp();
+    const post = await app.inject({
+      method: "POST",
+      url: "/compile",
+      payload: validBody,
+    });
+    const { jobId } = CompileResponseSchema.parse(post.json());
+    const res = await app.inject({ method: "GET", url: `/jobs/${jobId}` });
+    expect(res.json()).not.toHaveProperty("downloadUrl");
+    expect(Object.keys(res.json() as object).sort()).toEqual([
+      "jobId",
+      "status",
+    ]);
+  });
+
+  it("returns a freshly signed downloadUrl for a succeeded job", async () => {
+    const store = createJobStore();
+    const signArtifactUrl = vi.fn(
+      async (key: string) => `https://s3.example.com/${key}?sig=fresh`,
+    );
+    const app = buildApp({ store, signArtifactUrl });
+    const post = await app.inject({
+      method: "POST",
+      url: "/compile",
+      payload: validBody,
+    });
+    const { jobId } = CompileResponseSchema.parse(post.json());
+    // Mirror what the worker outcome does after a successful upload.
+    store.setStatus(jobId, "succeeded", {
+      artifactKey: `artifacts/${jobId}.pdf`,
+    });
+
+    const res = await app.inject({ method: "GET", url: `/jobs/${jobId}` });
+    expect(res.statusCode).toBe(200);
+    const body = JobResponseSchema.parse(res.json());
+    expect(body).toEqual({
+      jobId,
+      status: "succeeded",
+      downloadUrl: `https://s3.example.com/artifacts/${jobId}.pdf?sig=fresh`,
+    });
+    expect(signArtifactUrl).toHaveBeenCalledWith(`artifacts/${jobId}.pdf`);
+  });
+
+  it("returns the safe failure code for a failed job", async () => {
+    const store = createJobStore();
+    const app = buildApp({ store });
+    const post = await app.inject({
+      method: "POST",
+      url: "/compile",
+      payload: validBody,
+    });
+    const { jobId } = CompileResponseSchema.parse(post.json());
+    store.setStatus(jobId, "failed", { error: "UPLOAD_FAILED" });
+
+    const res = await app.inject({ method: "GET", url: `/jobs/${jobId}` });
+    expect(res.statusCode).toBe(200);
+    expect(JobResponseSchema.parse(res.json())).toEqual({
+      jobId,
+      status: "failed",
+      error: "UPLOAD_FAILED",
+    });
+    expect(res.json()).not.toHaveProperty("downloadUrl");
+  });
+
+  it("answers 500 ARTIFACT_UNAVAILABLE when succeeded but signing is impossible", async () => {
+    const store = createJobStore();
+    const app = buildApp({ store }); // no signer wired
+    const post = await app.inject({
+      method: "POST",
+      url: "/compile",
+      payload: validBody,
+    });
+    const { jobId } = CompileResponseSchema.parse(post.json());
+    store.setStatus(jobId, "succeeded", {
+      artifactKey: `artifacts/${jobId}.pdf`,
+    });
+
+    const res = await app.inject({ method: "GET", url: `/jobs/${jobId}` });
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "ARTIFACT_UNAVAILABLE" });
   });
 
   it("keeps job stores isolated between app instances", async () => {

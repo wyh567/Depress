@@ -12,25 +12,23 @@ export const CompileRequestSchema = z.object({
 });
 export type CompileRequest = z.infer<typeof CompileRequestSchema>;
 
-export const JobStatusSchema = z.enum([
-  "queued",
-  "processing",
-  "succeeded",
-  "failed",
-]);
-export type JobStatus = z.infer<typeof JobStatusSchema>;
+// Job status/response schemas moved to @depress/ast (Invariant #3): they
+// cross the API↔worker↔web boundary. Re-exported here so route/store code
+// keeps a single import site for API contracts.
+export {
+  JobStatusSchema,
+  JobFailureCodeSchema,
+  JobResponseSchema,
+  type JobStatus,
+  type JobFailureCode,
+  type JobResponse,
+} from "@depress/ast";
 
 export const CompileResponseSchema = z.object({
   jobId: z.string().uuid(),
   status: z.literal("queued"),
 });
 export type CompileResponse = z.infer<typeof CompileResponseSchema>;
-
-export const JobResponseSchema = z.object({
-  jobId: z.string().uuid(),
-  status: JobStatusSchema,
-});
-export type JobResponse = z.infer<typeof JobResponseSchema>;
 
 export const ErrorResponseSchema = z.object({
   error: z.string(),

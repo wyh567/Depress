@@ -12,6 +12,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.828.0",
+    "@aws-sdk/s3-request-presigner": "^3.828.0",
     "@depress/ast": "workspace:*",
     "@depress/transformers": "workspace:*",
     "bullmq": "^5.79.0",

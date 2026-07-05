@@ -40,7 +40,7 @@ export function registerCompileRoute(
         format: parsed.data.format,
       });
     } catch {
-      store.setStatus(job.id, "failed");
+      store.setStatus(job.id, "failed", { error: "QUEUE_UNAVAILABLE" });
       const body: ErrorResponse = { error: "QUEUE_UNAVAILABLE" };
       return reply.status(503).send(body);
     }

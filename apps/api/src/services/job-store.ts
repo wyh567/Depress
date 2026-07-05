@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { CompileRequest, JobStatus } from "../contracts";
+import type { CompileRequest, JobFailureCode, JobStatus } from "../contracts";
 
 export interface Job {
   id: string;
@@ -7,6 +7,11 @@ export interface Job {
   templateId: CompileRequest["templateId"];
   format: CompileRequest["format"];
   createdAt: number;
+  // S3 object key of the compiled PDF — set only on succeeded jobs. Signed
+  // URLs are never stored (they expire); GET /jobs/:id signs on read.
+  artifactKey?: string;
+  // Safe failure code — set only on failed jobs.
+  error?: JobFailureCode;
 }
 
 // In-memory store, one instance per app (no global singleton) so tests stay
@@ -29,10 +34,16 @@ export function createJobStore() {
     get(id: string): Job | undefined {
       return jobs.get(id);
     },
-    // Status-only transition; no artifact fields until the S3 TODO.
-    setStatus(id: string, status: JobStatus): void {
+    setStatus(
+      id: string,
+      status: JobStatus,
+      extra: { artifactKey?: string; error?: JobFailureCode } = {},
+    ): void {
       const job = jobs.get(id);
-      if (job) job.status = status;
+      if (!job) return;
+      job.status = status;
+      if (extra.artifactKey !== undefined) job.artifactKey = extra.artifactKey;
+      if (extra.error !== undefined) job.error = extra.error;
     },
   };
 }

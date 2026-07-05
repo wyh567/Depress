@@ -1,5 +1,9 @@
 import { COMPILE_QUEUE_NAME } from "../queue/compile-queue";
-import { processCompileJob, type CompileJobOutcome } from "./compile-processor";
+import {
+  processCompileJob,
+  type ArtifactUploader,
+  type CompileJobOutcome,
+} from "./compile-processor";
 import { createTypstSandboxRunner } from "./typst-sandbox";
 
 // Thin BullMQ wiring — all logic lives in processCompileJob (unit-tested);
@@ -9,15 +13,23 @@ import { createTypstSandboxRunner } from "./typst-sandbox";
 export async function startCompileWorker(options: {
   connection: { host: string; port: number };
   onOutcome?: (jobId: string, outcome: CompileJobOutcome) => void;
+  artifacts?: ArtifactUploader;
 }): Promise<{ close(): Promise<void> }> {
   const { Worker } = await import("bullmq");
   const sandbox = createTypstSandboxRunner();
+  // Lazy import keeps unit tests off the S3 module; in production the
+  // module-init env validation makes a misconfigured worker fail at startup,
+  // not mid-job.
+  const artifacts: ArtifactUploader =
+    options.artifacts ??
+    (await import("../services/s3")).createS3ArtifactService();
 
   const worker = new Worker(
     COMPILE_QUEUE_NAME,
     async (job) => {
       const outcome = await processCompileJob(job.data as unknown, {
         sandbox,
+        artifacts,
       });
       options.onOutcome?.(job.id ?? "", outcome);
       if (outcome.status === "failed") {
