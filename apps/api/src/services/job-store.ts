@@ -29,6 +29,11 @@ export function createJobStore() {
     get(id: string): Job | undefined {
       return jobs.get(id);
     },
+    // Status-only transition; no artifact fields until the S3 TODO.
+    setStatus(id: string, status: JobStatus): void {
+      const job = jobs.get(id);
+      if (job) job.status = status;
+    },
   };
 }
 

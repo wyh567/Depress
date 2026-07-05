@@ -5,10 +5,12 @@ import {
   type ErrorResponse,
 } from "../contracts";
 import type { JobStore } from "../services/job-store";
+import type { CompileQueue } from "../queue/compile-queue";
 
 export function registerCompileRoute(
   app: FastifyInstance,
   store: JobStore,
+  queue: CompileQueue,
 ): void {
   app.post("/compile", async (request, reply) => {
     // Body is untrusted — always parse as unknown (never trust inferred types).
@@ -25,11 +27,23 @@ export function registerCompileRoute(
     }
 
     // Async contract (Invariant #4): only enqueue — no transformer, no Typst,
-    // no artifact here. A worker picks the job up in a later TODO.
+    // no artifact here. The BullMQ worker compiles out of process.
     const job = store.create({
       templateId: parsed.data.templateId,
       format: parsed.data.format,
     });
+    try {
+      await queue.enqueue({
+        jobId: job.id,
+        ast: parsed.data.ast,
+        templateId: parsed.data.templateId,
+        format: parsed.data.format,
+      });
+    } catch {
+      store.setStatus(job.id, "failed");
+      const body: ErrorResponse = { error: "QUEUE_UNAVAILABLE" };
+      return reply.status(503).send(body);
+    }
     const body: CompileResponse = { jobId: job.id, status: "queued" };
     return reply.status(202).send(body);
   });

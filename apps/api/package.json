@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@depress/ast": "workspace:*",
+    "@depress/transformers": "workspace:*",
+    "bullmq": "^5.79.0",
     "fastify": "^5.4.0",
     "zod": "^3.25.0"
   },
