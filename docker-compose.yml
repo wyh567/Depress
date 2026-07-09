@@ -1,0 +1,50 @@
+# Local round-trip infra: Redis (BullMQ) + MinIO (S3-compatible artifacts).
+# Usage: docker compose up -d && cp .env.example .env
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: depress
+      MINIO_ROOT_PASSWORD: depress-secret
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # One-shot bucket init. Guards against the MinIO startup race twice:
+  # depends_on waits for the healthcheck, and the entrypoint still retries
+  # `mc alias set` because "healthy" and "accepting S3 calls" can differ by
+  # a beat. `mc mb --ignore-existing` keeps re-runs idempotent.
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 depress depress-secret; do
+        echo 'minio not ready yet, retrying...'; sleep 1;
+      done;
+      mc mb --ignore-existing local/depress-artifacts;
+      echo 'bucket depress-artifacts ready';
+      "
+
+volumes:
+  minio-data:

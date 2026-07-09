@@ -5,6 +5,7 @@ import { useCallback, useState } from "react";
 import { useReferenceLibrary } from "@/stores/reference-library";
 import { CitationPrompt } from "./citation-prompt";
 import { ExportAstButton } from "./export-ast-button";
+import { ExportPdfButton } from "./export-pdf-button";
 import { useDepressEditor } from "./use-depress-editor";
 
 export function EditorArea() {
@@ -33,7 +34,10 @@ export function EditorArea() {
     <main className="flex min-h-0 flex-col bg-white">
       <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
         <h2 className="text-sm font-semibold text-gray-700">编辑区</h2>
-        <ExportAstButton getEditorJson={() => editor?.getJSON()} />
+        <div className="flex items-start gap-2">
+          <ExportAstButton getEditorJson={() => editor?.getJSON()} />
+          <ExportPdfButton getEditorJson={() => editor?.getJSON()} />
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <EditorContent

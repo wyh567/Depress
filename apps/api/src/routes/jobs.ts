@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { JobResponseSchema, type ErrorResponse } from "../contracts";
-import type { JobStore } from "../services/job-store";
+import type { JobReader } from "../services/job-reader";
 
 const JobParamsSchema = z.object({ id: z.string().min(1) });
 
@@ -11,12 +11,12 @@ export type ArtifactUrlSigner = (key: string) => Promise<string>;
 
 export function registerJobsRoute(
   app: FastifyInstance,
-  store: JobStore,
+  jobs: JobReader,
   signArtifactUrl?: ArtifactUrlSigner,
 ): void {
   app.get("/jobs/:id", async (request, reply) => {
     const params = JobParamsSchema.safeParse(request.params as unknown);
-    const job = params.success ? store.get(params.data.id) : undefined;
+    const job = params.success ? await jobs.get(params.data.id) : undefined;
     if (!job) {
       const body: ErrorResponse = { error: "JOB_NOT_FOUND" };
       return reply.status(404).send(body);

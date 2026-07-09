@@ -9,18 +9,22 @@
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dev:server": "tsx watch src/server.ts",
+    "dev:worker": "tsx watch src/worker-main.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.828.0",
     "@aws-sdk/s3-request-presigner": "^3.828.0",
     "@depress/ast": "workspace:*",
     "@depress/transformers": "workspace:*",
+    "@fastify/cors": "^11.0.0",
     "bullmq": "^5.79.0",
     "fastify": "^5.4.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
+    "tsx": "^4.19.0",
     "vitest": "^3.2.0"
   }
 }
