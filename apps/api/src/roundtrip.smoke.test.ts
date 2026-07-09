@@ -48,6 +48,7 @@ describe.skipIf(process.env["DEPRESS_ROUNDTRIP_SMOKE"] !== "1")(
             },
             templateId: "ieee",
             format: "pdf",
+            references: [],
           },
         });
         expect(post.statusCode).toBe(202);

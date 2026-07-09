@@ -5,7 +5,7 @@ import { useCompileExport } from "./use-compile-export";
 
 // 失败码 → 用户可读文案;未知码兜底展示原码,绝不吞掉。
 const ERROR_TEXT: Record<string, string> = {
-  AST_VALIDATION_FAILED: "文档未通过 AST 校验,已中止导出",
+  AST_VALIDATION_FAILED: "文档未通过校验,已中止导出",
   EXPORT_TIMEOUT: "编译超时(60 秒),请稍后重试",
   NETWORK_ERROR: "无法连接编译服务",
   QUEUE_UNAVAILABLE: "编译队列不可用,请稍后重试",

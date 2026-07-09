@@ -36,6 +36,7 @@ export function registerCompileRoute(
       await queue.enqueue({
         jobId: job.id,
         ast: parsed.data.ast,
+        references: parsed.data.references,
         templateId: parsed.data.templateId,
         format: parsed.data.format,
       });

@@ -1,7 +1,30 @@
 import { describe, expect, it, vi } from "vitest";
+import type { CslItem } from "@depress/ast";
 import { runCompileExport, type CompileExportDeps } from "./compile-export";
 
 const JOB_ID = "6f9619ff-8b86-d011-b42d-00c04fc964ff";
+
+const smith: CslItem = {
+  id: "smith2024",
+  type: "article-journal",
+  title: "A Study",
+  volume: "12",
+  issue: "3",
+  page: "10-20",
+};
+
+const lee: CslItem = {
+  id: "lee2023",
+  type: "book",
+  title: "Another",
+  publisher: "Press",
+};
+
+const unused: CslItem = {
+  id: "unused",
+  type: "document",
+  title: "Not cited",
+};
 
 const validEditorJson = () => ({
   type: "doc",
@@ -46,6 +69,7 @@ function deps(
   const clock = fakeClock();
   return {
     apiUrl: "http://api.test",
+    library: [smith, unused],
     fetchFn,
     now: clock.now,
     sleep: clock.sleep,
@@ -83,6 +107,7 @@ describe("runCompileExport — 预检(Guardrail #3)", () => {
     ];
     const sent = JSON.parse(String(init.body)) as {
       ast: { content: { content: unknown[] }[] };
+      references: CslItem[];
       templateId: string;
       format: string;
     };
@@ -93,6 +118,88 @@ describe("runCompileExport — 预检(Guardrail #3)", () => {
       type: "citation",
       citeKey: "smith2024",
     });
+    // 仅发送被引用子集,不含 unused。
+    expect(sent.references).toEqual([smith]);
+  });
+
+  it("缺失被引文献时本地失败,绝不发请求", async () => {
+    const fetchFn = vi.fn() as unknown as typeof fetch;
+    const result = await runCompileExport(
+      validEditorJson(),
+      deps(fetchFn, { library: [unused] }),
+    );
+    expect(result.outcome).toBe("validation_error");
+    if (result.outcome === "validation_error") {
+      expect(result.issues[0]).toMatchObject({
+        path: "references.0",
+        message: expect.stringContaining("smith2024"),
+      });
+    }
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("无引用文档发送 references: []", async () => {
+    const fetchFn = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith("/compile")) {
+        return jsonResponse(202, { jobId: JOB_ID, status: "queued" });
+      }
+      return jsonResponse(200, {
+        jobId: JOB_ID,
+        status: "succeeded",
+        downloadUrl: "https://s3.test/a.pdf",
+      });
+    }) as unknown as typeof fetch;
+    await runCompileExport(
+      {
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "Hi" }] }],
+      },
+      deps(fetchFn, { library: [smith] }),
+    );
+    const [, init] = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    const sent = JSON.parse(String(init.body)) as { references: unknown[] };
+    expect(sent.references).toEqual([]);
+  });
+
+  it("重复引用只发送一条 reference,且不突变 library", async () => {
+    const library: CslItem[] = [smith, lee, unused];
+    const snapshot = structuredClone(library);
+    const fetchFn = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith("/compile")) {
+        return jsonResponse(202, { jobId: JOB_ID, status: "queued" });
+      }
+      return jsonResponse(200, {
+        jobId: JOB_ID,
+        status: "succeeded",
+        downloadUrl: "https://s3.test/a.pdf",
+      });
+    }) as unknown as typeof fetch;
+    await runCompileExport(
+      {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "citation", attrs: { citeKey: "lee2023" } },
+              { type: "citation", attrs: { citeKey: "smith2024" } },
+              { type: "citation", attrs: { citeKey: "lee2023" } },
+            ],
+          },
+        ],
+      },
+      deps(fetchFn, { library }),
+    );
+    const [, init] = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    const sent = JSON.parse(String(init.body)) as { references: CslItem[] };
+    expect(sent.references).toEqual([lee, smith]);
+    expect(library).toEqual(snapshot);
   });
 });
 
@@ -187,6 +294,7 @@ describe("runCompileExport — 硬超时(Guardrail #2)", () => {
 
     const result = await runCompileExport(validEditorJson(), {
       apiUrl: "http://api.test",
+      library: [smith],
       fetchFn,
       now: clock.now,
       sleep: clock.sleep,

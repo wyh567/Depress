@@ -22,6 +22,14 @@ const validPayload = () => ({
       },
     ],
   },
+  references: [
+    {
+      id: "smith2024",
+      type: "article-journal",
+      title: "A Study",
+      volume: "12",
+    },
+  ],
   templateId: "ieee",
   format: "pdf",
 });
@@ -56,6 +64,32 @@ describe("processCompileJob", () => {
     expect(outcome).toEqual({ status: "failed", error: "INVALID_AST" });
     expect(compile).not.toHaveBeenCalled();
     expect(uploadArtifact).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid queued references without compiling", async () => {
+    const { sandbox, compile } = fakeSandbox();
+    const { artifacts, uploadArtifact } = fakeArtifacts();
+    const outcome = await processCompileJob(
+      {
+        ...validPayload(),
+        references: [{ id: "   ", type: "book", title: "T" }],
+      },
+      { sandbox, artifacts },
+    );
+    expect(outcome).toEqual({ status: "failed", error: "INVALID_AST" });
+    expect(compile).not.toHaveBeenCalled();
+    expect(uploadArtifact).not.toHaveBeenCalled();
+  });
+
+  it("accepts valid references and leaves compilation behavior unchanged", async () => {
+    const { sandbox, compile } = fakeSandbox();
+    const { artifacts } = fakeArtifacts();
+    const payload = validPayload();
+    const outcome = await processCompileJob(payload, { sandbox, artifacts });
+    expect(outcome.status).toBe("succeeded");
+    // TODO #3 will consume references; this task only transports them.
+    expect(payload.references).toHaveLength(1);
+    expect(compile).toHaveBeenCalledTimes(1);
   });
 
   it("renders via renderIeeeTypstDocument and passes IEEE Typst to the sandbox", async () => {

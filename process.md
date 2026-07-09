@@ -3,7 +3,7 @@
 ## Status
 - Current Phase: **3**
 - Phase 2: **COMPLETE**
-- Last Updated: 2026-07-09（Phase 2 真实 round-trip smoke 验收通过；正式进入 Phase 3）
+- Last Updated: 2026-07-09（Phase 3 TODO #2 bibliography compile contract 完成；TODO #3 待做）
 
 ## Phase 1 — Editor Core & AST Contract
 Goal: A working structured editor that emits validated AST JSON. No backend yet.
@@ -104,13 +104,14 @@ Goal: Deployable portfolio product.
 - **Risks:** 破坏现有仅 `{type,content}` 的 Doc fixture；web/api/transformer 需同 PR 更新（Invariant #3）。
 
 ### TODO #2 — CSL schema expansion + bibliography compile contract
+- [x] **COMPLETE (2026-07-09):** `CslItemSchema` 扩展 volume/issue/page/publisher/URL；`CompileRequestSchema` + `CompileJobPayloadSchema` 迁入 `@depress/ast` 并含必填 `references: CslItem[]`（`.strict()` + 拒绝重复 `id`）；Web `selectCitedReferences` 按文档 citeKey 首次出现序发送子集（重复折叠、无引用→`[]`、缺失→POST 前 validation_error）；`CitationNodeSchema`/`CslItem.id` 均 trim 保大小写；BibTeX 映射 volume/number→issue/pages→page/publisher/url→URL；API/Queue/Worker 每边界重校验。**未做** bibliography 渲染（TODO #3）。
 - **Goal:** 足够支撑期刊参考文献的 CSL-JSON 子集；`references` 进入 Web→API→Queue→Worker 全链路；每边界 Zod 重校验；citeKey 可匹配 `CslItem.id`。
 - **Scope:**
   1. 扩展 `CslItemSchema`（至少：volume、issue、page、publisher、URL；按需 language）；更新 BibTeX mapper。
   2. 将 `CompileRequestSchema` / `CompileJobPayloadSchema` **迁入 `@depress/ast`**（纠正当前契约住在 `apps/api` 的 Invariant #3 漂移）。
   3. payload 增加 `references: CslItem[]`（或 `z.array(CslItemSchema)`）；web `compile-export` 发送**文档实际引用到的** references 子集；worker 重 parse。
 - **Files likely affected:** `packages/ast/src/csl.ts`、`job`/`compile` 新契约文件；`apps/api/src/contracts.ts`、`queue/compile-queue.ts`、routes、worker tests；`apps/web/components/editor/compile-export.ts`、`stores/reference-library.ts`、`bibtex-to-csl.ts`。
-- **Data contract change:** 破坏性扩展 compile body（旧客户端无 references → 400 或空数组策略须文档化；推荐：**缺省 `[]` 合法，但存在 citeKey 而无匹配 reference 时由 #3 定义行为**）。
+- **Data contract change:** 破坏性扩展 compile body（旧客户端无 references → 400）；**`references` 必填**（无引用发 `[]`）；存在 citeKey 而无匹配 reference 时 **Web 本地失败不发 POST**。
 - **Test requirements:** CSL 新字段正/负例；compile 契约单测；queue payload round-trip；web POST body 含 references；**禁止**把渲染后的 “[1]” 写入 AST。
 - **Acceptance criteria:** 同一 `CslItem[]` 从 web 到 worker 无损；worker `safeParse` 失败 → `INVALID_AST`；未知 template 仍 400。
 - **Explicit non-goals:** 实际 bibliography 排版（#3）；DOI 网络（#4）；多模板（#5–#7）。

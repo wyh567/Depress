@@ -18,7 +18,7 @@ describe("bibtexToCsl 类型映射", () => {
     });
   });
 
-  it("@book → book,publisher 不丢 title/作者", () => {
+  it("@book → book,publisher 映射到 CSL publisher", () => {
     const { items } = bibtexToCsl(
       `@book{knuth1997, author = {Knuth, Donald E.}, title = {The Art of Computer Programming}, publisher = {Addison-Wesley}, year = {1997}}`
     );
@@ -28,6 +28,7 @@ describe("bibtexToCsl 类型映射", () => {
       title: "The Art of Computer Programming",
       author: [{ family: "Knuth", given: "Donald E." }],
       issued: { "date-parts": [[1997]] },
+      publisher: "Addison-Wesley",
     });
   });
 
@@ -61,6 +62,31 @@ describe("bibtexToCsl 类型映射", () => {
       `@article{d1, title = {T}, journal = {J}, year = {2024}, doi = {${doi}}}`
     );
     expect(items[0]?.DOI).toBe(doi);
+  });
+
+  it("映射 volume/number/pages/url 到 CSL 字段", () => {
+    const { items, errors } = bibtexToCsl(
+      `@article{m1, title = {T}, journal = {J}, year = {2024}, volume = {12}, number = {3}, pages = {10--20}, url = {https://example.com/m1}}`
+    );
+    expect(errors).toEqual([]);
+    expect(items[0]).toMatchObject({
+      volume: "12",
+      issue: "3",
+      URL: "https://example.com/m1",
+    });
+    // Parser may normalize BibTeX `--` to an en-dash; accept either form.
+    expect(items[0]?.page).toBeDefined();
+    expect(items[0]?.page).toMatch(/10/);
+    expect(items[0]?.page).toMatch(/20/);
+  });
+
+  it("未知/多余字段不破坏导入", () => {
+    const { items, errors } = bibtexToCsl(
+      `@article{x1, title = {T}, journal = {J}, year = {2024}, note = {ignore me}, abstract = {also ignored}}`
+    );
+    expect(errors).toEqual([]);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ id: "x1", title: "T" });
   });
 
   it("非法 BibTeX 返回 errors 而不抛异常", () => {

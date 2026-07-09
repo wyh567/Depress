@@ -25,6 +25,24 @@ function toAuthor(creator: ParsedCreator): unknown {
   return { literal };
 }
 
+// @retorquere/bibtex-parser may return string | string[] for scalar fields
+// (e.g. publisher). Coerce to a single trimmed string for CslItemSchema.
+function fieldString(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  if (Array.isArray(value)) {
+    const parts = value
+      .filter((part): part is string => typeof part === "string")
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+    if (parts.length === 0) return undefined;
+    return parts.join(" ");
+  }
+  return undefined;
+}
+
 export function bibtexToCsl(text: string): { items: CslItem[]; errors: string[] } {
   let parsed: ReturnType<typeof parse>;
   try {
@@ -39,18 +57,32 @@ export function bibtexToCsl(text: string): { items: CslItem[]; errors: string[] 
 
   for (const entry of parsed.entries) {
     const fields = entry.fields as Record<string, unknown>;
-    const year = Number(fields.year);
+    const yearRaw = fieldString(fields.year);
+    const year = yearRaw !== undefined ? Number(yearRaw) : Number.NaN;
     const authors = (fields.author as ParsedCreator[] | undefined)?.map(toAuthor);
-    const containerTitle = (fields.journal ?? fields.booktitle) as string | undefined;
+    const containerTitle =
+      fieldString(fields.journal) ?? fieldString(fields.booktitle);
+    const title = fieldString(fields.title);
+    const doi = fieldString(fields.doi);
+    const volume = fieldString(fields.volume);
+    const issue = fieldString(fields.number);
+    const page = fieldString(fields.pages);
+    const publisher = fieldString(fields.publisher);
+    const url = fieldString(fields.url);
 
     const candidate = {
       id: entry.key,
       type: TYPE_MAP[entry.type] ?? "document",
-      title: fields.title,
+      title,
       ...(authors && authors.length > 0 ? { author: authors } : {}),
       ...(Number.isInteger(year) ? { issued: { "date-parts": [[year]] } } : {}),
       ...(containerTitle ? { "container-title": containerTitle } : {}),
-      ...(fields.doi ? { DOI: fields.doi } : {}),
+      ...(doi ? { DOI: doi } : {}),
+      ...(volume ? { volume } : {}),
+      ...(issue ? { issue } : {}),
+      ...(page ? { page } : {}),
+      ...(publisher ? { publisher } : {}),
+      ...(url ? { URL: url } : {}),
     };
 
     const result = CslItemSchema.safeParse(candidate);

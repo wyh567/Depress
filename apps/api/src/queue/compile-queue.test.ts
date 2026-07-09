@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { buildApp } from "../app";
 import { createInMemoryCompileQueue } from "./compile-queue";
 
+const smithRef = {
+  id: "smith2024",
+  type: "article-journal" as const,
+  title: "A Study",
+  volume: "12",
+  issue: "3",
+};
+
 const validAst = {
   type: "doc",
   content: [
@@ -15,14 +23,21 @@ const validAst = {
   ],
 };
 
+const validBody = {
+  ast: validAst,
+  references: [smithRef],
+  templateId: "ieee",
+  format: "pdf",
+};
+
 describe("POST /compile enqueue behavior", () => {
-  it("enqueues a validated payload with the queued jobId", async () => {
+  it("enqueues a validated payload with the queued jobId and references", async () => {
     const queue = createInMemoryCompileQueue();
     const app = buildApp({ queue });
     const res = await app.inject({
       method: "POST",
       url: "/compile",
-      payload: { ast: validAst, templateId: "ieee", format: "pdf" },
+      payload: validBody,
     });
     expect(res.statusCode).toBe(202);
     const { jobId } = res.json() as { jobId: string };
@@ -31,6 +46,7 @@ describe("POST /compile enqueue behavior", () => {
       jobId,
       templateId: "ieee",
       format: "pdf",
+      references: [smithRef],
     });
   });
 
@@ -42,8 +58,24 @@ describe("POST /compile enqueue behavior", () => {
       url: "/compile",
       payload: {
         ast: { type: "doc", content: [{ type: "heading", level: 4 }] },
+        references: [],
         templateId: "ieee",
         format: "pdf",
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(queue.payloads).toHaveLength(0);
+  });
+
+  it("does not enqueue when a reference is invalid", async () => {
+    const queue = createInMemoryCompileQueue();
+    const app = buildApp({ queue });
+    const res = await app.inject({
+      method: "POST",
+      url: "/compile",
+      payload: {
+        ...validBody,
+        references: [{ id: "", type: "book", title: "T" }],
       },
     });
     expect(res.statusCode).toBe(400);
@@ -61,7 +93,7 @@ describe("POST /compile enqueue behavior", () => {
     const res = await app.inject({
       method: "POST",
       url: "/compile",
-      payload: { ast: validAst, templateId: "ieee", format: "pdf" },
+      payload: validBody,
     });
     expect(res.statusCode).toBe(503);
     expect(res.json()).toEqual({ error: "QUEUE_UNAVAILABLE" });

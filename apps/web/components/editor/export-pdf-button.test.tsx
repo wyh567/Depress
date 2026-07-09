@@ -27,6 +27,7 @@ function instantDeps(fetchFn: typeof fetch): Partial<CompileExportDeps> {
   let t = 0;
   return {
     apiUrl: "http://api.test",
+    library: [],
     fetchFn,
     now: () => t,
     sleep: async (ms) => {
@@ -83,7 +84,7 @@ describe("ExportPdfButton", () => {
     fireEvent.click(screen.getByRole("button", { name: "Export PDF (IEEE)" }));
 
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
-    expect(screen.getByText("文档未通过 AST 校验,已中止导出")).toBeInTheDocument();
+    expect(screen.getByText("文档未通过校验,已中止导出")).toBeInTheDocument();
     expect(fetchFn).not.toHaveBeenCalled();
     expect(download).not.toHaveBeenCalled();
   });

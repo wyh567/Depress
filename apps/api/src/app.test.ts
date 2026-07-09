@@ -17,7 +17,19 @@ const validAst = {
   ],
 };
 
-const validBody = { ast: validAst, templateId: "ieee", format: "pdf" };
+const validBody = {
+  ast: validAst,
+  references: [
+    {
+      id: "smith2024",
+      type: "article-journal",
+      title: "A Study",
+      volume: "12",
+    },
+  ],
+  templateId: "ieee",
+  format: "pdf",
+};
 
 describe("POST /compile", () => {
   it("queues a job for a valid request", async () => {
@@ -76,6 +88,66 @@ describe("POST /compile", () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ error: "VALIDATION_ERROR" });
+  });
+
+  it("rejects an invalid reference item", async () => {
+    const app = buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/compile",
+      payload: {
+        ...validBody,
+        references: [{ id: "   ", type: "book", title: "T" }],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "VALIDATION_ERROR" });
+  });
+
+  it("rejects duplicate reference ids", async () => {
+    const app = buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/compile",
+      payload: {
+        ...validBody,
+        references: [
+          { id: "smith2024", type: "article-journal", title: "A" },
+          { id: "smith2024", type: "article-journal", title: "B" },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "VALIDATION_ERROR" });
+  });
+
+  it("rejects unknown compile fields such as fontSize", async () => {
+    const app = buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/compile",
+      payload: { ...validBody, fontSize: 72 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "VALIDATION_ERROR" });
+  });
+
+  it("accepts references: [] for citation-free documents", async () => {
+    const app = buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/compile",
+      payload: {
+        ast: {
+          type: "doc",
+          content: [{ type: "paragraph", content: [{ type: "text", text: "Hi" }] }],
+        },
+        references: [],
+        templateId: "ieee",
+        format: "pdf",
+      },
+    });
+    expect(res.statusCode).toBe(202);
   });
 });
 

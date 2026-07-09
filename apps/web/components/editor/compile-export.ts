@@ -1,12 +1,17 @@
-import { JobResponseSchema } from "@depress/ast";
+import {
+  CompileRequestSchema,
+  JobResponseSchema,
+  type CslItem,
+} from "@depress/ast";
 import { exportValidatedAst, type ExportIssue } from "./export-ast";
+import { selectCitedReferences } from "./select-cited-references";
 
-// 编译导出的纯逻辑核心:AST 严格预检(Guardrail #3)→ POST /compile →
-// 2s 轮询 GET /jobs/:id → 60s 硬超时(Guardrail #2)。所有 I/O 与时间都
-// 可注入,单测 mock fetch/sleep/now,不碰真实网络与真实计时器。
-// 跨边界响应一律 JobResponseSchema(@depress/ast)校验:POST 的 202 体
-// 就是 queued 变体,轮询体是完整判别联合——strict schema 保证 queued
-// 阶段混入 downloadUrl 这类幽灵字段会被当作契约违规拒绝,而非静默通过。
+// 编译导出的纯逻辑核心:AST 严格预检(Guardrail #3)→ 引用子集解析 →
+// CompileRequestSchema 边界校验 → POST /compile → 2s 轮询 GET /jobs/:id →
+// 60s 硬超时(Guardrail #2)。所有 I/O 与时间都可注入。
+//
+// Phase 3 TODO #2: POST body 携带 references(仅文档实际引用到的 CSL 子集)。
+// 缺失被引文献在本地失败,绝不发请求。citation 节点仍只存 citeKey。
 
 export type CompileExportPhase = "compiling" | "polling";
 
@@ -17,6 +22,9 @@ export type CompileExportResult =
 
 export interface CompileExportDeps {
   apiUrl: string;
+  // Snapshot of the local reference library at export time (read-only).
+  // Production wires Zustand; tests inject fixtures. Never mutated here.
+  library: readonly CslItem[];
   fetchFn?: typeof fetch;
   pollIntervalMs?: number;
   timeoutMs?: number;
@@ -49,17 +57,34 @@ export async function runCompileExport(
     return { outcome: "validation_error", issues: exported.issues };
   }
 
+  const cited = selectCitedReferences(exported.ast, deps.library);
+  if (!cited.success) {
+    return { outcome: "validation_error", issues: cited.issues };
+  }
+
+  const request = CompileRequestSchema.safeParse({
+    ast: exported.ast,
+    references: cited.references,
+    templateId: "ieee",
+    format: "pdf",
+  });
+  if (!request.success) {
+    return {
+      outcome: "validation_error",
+      issues: request.error.issues.map((issue) => ({
+        path: issue.path.join(".") || "(root)",
+        message: issue.message,
+      })),
+    };
+  }
+
   deps.onPhase?.("compiling");
   let jobId: string;
   try {
     const res = await fetchFn(`${deps.apiUrl}/compile`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        ast: exported.ast,
-        templateId: "ieee",
-        format: "pdf",
-      }),
+      body: JSON.stringify(request.data),
     });
     if (res.status !== 202) {
       return { outcome: "error", message: await safeErrorCode(res) };

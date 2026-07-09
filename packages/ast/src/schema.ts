@@ -16,13 +16,13 @@ export const TextNodeSchema = z.object({
 export type TextNode = z.infer<typeof TextNodeSchema>;
 
 // Citations store the citeKey only; formatted text is produced at compile
-// time (Invariant #2).
+// time (Invariant #2). Trim matches CslItem.id / editor insertCitation so
+// " smith2024 " cannot diverge from library id "smith2024". Case is preserved
+// (matching remains case-sensitive).
+const trimmedCiteKey = z.string().trim().min(1);
 export const CitationNodeSchema = z.object({
   type: z.literal("citation"),
-  citeKey: z
-    .string()
-    .min(1)
-    .refine((s) => s.trim().length > 0, { message: "citeKey 不能为纯空白" }),
+  citeKey: trimmedCiteKey,
 });
 export type CitationNode = z.infer<typeof CitationNodeSchema>;
 

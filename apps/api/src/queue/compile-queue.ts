@@ -1,16 +1,9 @@
-import { z } from "zod";
-import { DocSchema } from "@depress/ast";
+import {
+  CompileJobPayloadSchema,
+  type CompileJobPayload,
+} from "@depress/ast";
 
-// Queue payload contract — Zod single source of truth, shared by the API
-// (producer) and the worker (consumer). The worker still re-parses this
-// (Invariant #4 / cursorrules): queue contents are untrusted at both ends.
-export const CompileJobPayloadSchema = z.object({
-  jobId: z.string().uuid(),
-  ast: DocSchema,
-  templateId: z.literal("ieee"),
-  format: z.literal("pdf"),
-});
-export type CompileJobPayload = z.infer<typeof CompileJobPayloadSchema>;
+export { CompileJobPayloadSchema, type CompileJobPayload };
 
 export const COMPILE_QUEUE_NAME = "compile";
 
@@ -30,7 +23,13 @@ export function createInMemoryCompileQueue(): CompileQueue & {
   return {
     payloads,
     async enqueue(payload) {
-      payloads.push(payload);
+      // Re-validate at the producer boundary — queue contents are untrusted
+      // even when the caller is our own route (Invariant #3).
+      const parsed = CompileJobPayloadSchema.safeParse(payload);
+      if (!parsed.success) {
+        throw new Error("INVALID_COMPILE_JOB_PAYLOAD");
+      }
+      payloads.push(parsed.data);
     },
   };
 }
@@ -49,12 +48,16 @@ export function createBullmqCompileQueue(connection: {
 
   return {
     async enqueue(payload) {
+      const parsed = CompileJobPayloadSchema.safeParse(payload);
+      if (!parsed.success) {
+        throw new Error("INVALID_COMPILE_JOB_PAYLOAD");
+      }
       queuePromise ??= import("bullmq").then(
         ({ Queue }) => new Queue(COMPILE_QUEUE_NAME, { connection }),
       );
       const queue = await queuePromise;
       // jobId dedupes retried HTTP requests at the queue level.
-      await queue.add("compile", payload, { jobId: payload.jobId });
+      await queue.add("compile", parsed.data, { jobId: parsed.data.jobId });
     },
   };
 }

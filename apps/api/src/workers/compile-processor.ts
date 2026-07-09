@@ -1,6 +1,5 @@
 import { renderIeeeTypstDocument } from "@depress/transformers";
-import type { JobFailureCode } from "@depress/ast";
-import { CompileJobPayloadSchema } from "../queue/compile-queue";
+import { CompileJobPayloadSchema, type JobFailureCode } from "@depress/ast";
 import type { TypstSandboxRunner } from "./typst-sandbox";
 
 // Worker-side result contract. The succeeded outcome carries the S3 object

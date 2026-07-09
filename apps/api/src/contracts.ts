@@ -1,21 +1,18 @@
 import { z } from "zod";
-import { DocSchema } from "@depress/ast";
 
-// API contract — Zod is the single source of truth; TS types via z.infer.
+// API-local contracts that do NOT cross Web↔API↔Worker (Invariant #3
+// shared compile/job schemas live in @depress/ast and are re-exported).
 
-// templateId/format are deliberately literal for now: only the built-in IEEE
-// template and PDF output exist in this phase.
-export const CompileRequestSchema = z.object({
-  ast: DocSchema,
-  templateId: z.literal("ieee"),
-  format: z.literal("pdf"),
-});
-export type CompileRequest = z.infer<typeof CompileRequestSchema>;
-
-// Job status/response schemas moved to @depress/ast (Invariant #3): they
-// cross the API↔worker↔web boundary. Re-exported here so route/store code
-// keeps a single import site for API contracts.
 export {
+  CompileRequestSchema,
+  CompileJobPayloadSchema,
+  CompileTemplateIdSchema,
+  CompileFormatSchema,
+  collectCiteKeys,
+  type CompileRequest,
+  type CompileJobPayload,
+  type CompileTemplateId,
+  type CompileFormat,
   JobStatusSchema,
   JobFailureCodeSchema,
   JobResponseSchema,

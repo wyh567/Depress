@@ -54,6 +54,23 @@ describe("DocSchema rejects invalid input", () => {
     ).toBe(false);
   });
 
+  it("trims surrounding whitespace on citeKey but preserves case", () => {
+    const result = parseDoc(
+      docWith({
+        type: "paragraph",
+        content: [{ type: "citation", citeKey: "  Smith2024  " }],
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const para = result.data.content[0];
+      expect(para?.type).toBe("paragraph");
+      if (para?.type === "paragraph") {
+        expect(para.content[0]).toEqual({ type: "citation", citeKey: "Smith2024" });
+      }
+    }
+  });
+
   it("rejects citation with empty citeKey", () => {
     expect(
       parseDoc(docWith({ type: "paragraph", content: [{ type: "citation", citeKey: "" }] }))
