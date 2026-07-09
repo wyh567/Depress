@@ -7,7 +7,7 @@ Content ≠ Layout. The frontend produces a **structured content AST (JSON)**. T
 
 | Layer | Choice | Rationale |
 |---|---|---|
-| Frontend | Next.js 15 (App Router) + TypeScript | SSR for landing/docs, SPA feel for editor |
+| Frontend | Next.js 16 (App Router) + TypeScript | SSR for landing/docs, SPA feel for editor |
 | Editor Core | Tiptap (ProseMirror) | Schema-enforced document model; forbid marks like fontSize by omitting them from schema — enforcement at data layer, not CSS |
 | State | Zustand + Tiptap doc as source of truth | Minimal re-renders; doc JSON is canonical |
 | Citation UI | Custom Tiptap Node `citation` (stores citeKey only) | Rendering deferred to compile time |
@@ -60,9 +60,8 @@ depress/
 │   ├── ast/                    # Shared AST types + Zod schemas (single source of truth)
 │   ├── transformers/           # ast-to-typst, ast-to-pandoc-md
 │   └── templates/              # Journal templates (.typ, reference.docx, .csl)
-│       ├── ieee/
-│       ├── elsevier/
-│       └── gbt7714/
+│       ├── src/ieee.ts         # IEEE Typst template (immutable string asset)
+│       ├── ieee/ elsevier/ gbt7714/  # reserved dirs (Phase 3 fills elsevier + gbt7714)
 ├── docker/                     # Sandbox images for typst/pandoc
 ├── architecture.md
 ├── process.md

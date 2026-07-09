@@ -4,4 +4,5 @@ dist/
 .turbo/
 .env
 .env.*
+!.env.example
 *.tsbuildinfo
