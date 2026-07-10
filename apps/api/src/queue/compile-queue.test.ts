@@ -82,6 +82,18 @@ describe("POST /compile enqueue behavior", () => {
     expect(queue.payloads).toHaveLength(0);
   });
 
+  it("does not enqueue when a cited reference is missing", async () => {
+    const queue = createInMemoryCompileQueue();
+    const app = buildApp({ queue });
+    const res = await app.inject({
+      method: "POST",
+      url: "/compile",
+      payload: { ...validBody, references: [] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(queue.payloads).toHaveLength(0);
+  });
+
   it("marks the job failed and returns 503 when enqueue fails", async () => {
     const app = buildApp({
       queue: {

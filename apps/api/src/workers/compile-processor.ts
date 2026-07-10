@@ -1,4 +1,7 @@
-import { renderIeeeTypstDocument } from "@depress/transformers";
+import {
+  renderIeeeTypstProject,
+  type TypstCompileProject,
+} from "@depress/transformers";
 import { CompileJobPayloadSchema, type JobFailureCode } from "@depress/ast";
 import type { TypstSandboxRunner } from "./typst-sandbox";
 
@@ -42,12 +45,15 @@ export async function processCompileJob(
     return { status: "failed", error: "INVALID_AST" };
   }
 
-  // renderIeeeTypstDocument re-validates the AST internally and injects it
-  // into the immutable built-in IEEE template; citations flow citeKey →
-  // #cite via the transformer only.
-  let typstSource: string;
+  // The project renderer reuses the shared compile schema, selects cited
+  // references in first-occurrence order, and emits only fixed semantic file
+  // contents. Citations remain citeKey-only until Typst applies IEEE style.
+  let typstProject: TypstCompileProject;
   try {
-    typstSource = renderIeeeTypstDocument(parsed.data.ast);
+    typstProject = renderIeeeTypstProject({
+      ast: parsed.data.ast,
+      references: parsed.data.references,
+    });
   } catch {
     return { status: "failed", error: "INVALID_AST" };
   }
@@ -57,7 +63,7 @@ export async function processCompileJob(
   // including an upload failure below.
   let pdf: Buffer;
   try {
-    pdf = await deps.sandbox.compile(typstSource);
+    pdf = await deps.sandbox.compile(typstProject);
   } catch {
     return { status: "failed", error: "COMPILE_FAILED" };
   }

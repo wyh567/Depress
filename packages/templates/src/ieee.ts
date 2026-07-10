@@ -13,6 +13,7 @@
 export const IEEE_TEMPLATE_PLACEHOLDERS = Object.freeze({
   title: "{{TITLE}}",
   body: "{{BODY}}",
+  bibliography: "{{BIBLIOGRAPHY}}",
 });
 
 export const IEEE_TEMPLATE = `// DePress IEEE template (immutable asset — never user-editable)
@@ -40,4 +41,6 @@ export const IEEE_TEMPLATE = `// DePress IEEE template (immutable asset — neve
 ]
 
 {{BODY}}
+
+{{BIBLIOGRAPHY}}
 `;

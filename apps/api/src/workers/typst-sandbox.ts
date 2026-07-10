@@ -2,6 +2,11 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
+import {
+  TYPST_BIBLIOGRAPHY_FILE,
+  TYPST_ENTRYPOINT_FILE,
+  type TypstCompileProject,
+} from "@depress/transformers";
 
 // Sandbox policy (architecture.md §2 "Sandbox", Invariant #4): Typst
 // processes untrusted input, so it runs in Docker with no network, a
@@ -17,7 +22,8 @@ export const SANDBOX_LIMITS = {
   timeoutMs: 30_000,
 } as const;
 
-export const SANDBOX_INPUT_FILE = "main.typ";
+export const SANDBOX_INPUT_FILE = TYPST_ENTRYPOINT_FILE;
+export const SANDBOX_BIBLIOGRAPHY_FILE = TYPST_BIBLIOGRAPHY_FILE;
 export const SANDBOX_OUTPUT_FILE = "out.pdf";
 
 // Pure — unit-testable without Docker. workDir is the only writable mount.
@@ -80,7 +86,7 @@ export class SandboxCompileError extends Error {
 }
 
 export interface TypstSandboxRunner {
-  compile(typstSource: string): Promise<Buffer>;
+  compile(project: TypstCompileProject): Promise<Buffer>;
 }
 
 // Writes the source into a fresh controlled tmp dir, runs Typst in Docker,
@@ -91,10 +97,17 @@ export function createTypstSandboxRunner(
 ): TypstSandboxRunner {
   const runner = options.runner ?? defaultRunner;
   return {
-    async compile(typstSource) {
+    async compile(project) {
       const workDir = await mkdtemp(join(tmpdir(), "depress-typst-"));
       try {
-        await writeFile(join(workDir, SANDBOX_INPUT_FILE), typstSource, "utf8");
+        await writeFile(join(workDir, SANDBOX_INPUT_FILE), project.main, "utf8");
+        if (project.bibliography !== undefined) {
+          await writeFile(
+            join(workDir, SANDBOX_BIBLIOGRAPHY_FILE),
+            project.bibliography,
+            "utf8",
+          );
+        }
         try {
           await runner(
             "docker",

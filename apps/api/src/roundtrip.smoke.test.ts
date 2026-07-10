@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { JobResponseSchema } from "@depress/ast";
-import { renderIeeeTypstDocument } from "@depress/transformers";
+import { renderIeeeTypstProject } from "@depress/transformers";
 import { buildApp } from "./app";
 import { CompileResponseSchema } from "./contracts";
 import { createBullmqCompileQueue } from "./queue/compile-queue";
@@ -53,7 +53,7 @@ describe.skipIf(process.env["DEPRESS_ROUNDTRIP_SMOKE"] !== "1")(
           },
         ],
       };
-      const typstSource = renderIeeeTypstDocument(ast);
+      const typstSource = renderIeeeTypstProject({ ast, references: [] }).main;
       expect(typstSource).toContain("Metadata Aware Round Trip");
       expect(typstSource).not.toContain("DePress Draft");
 

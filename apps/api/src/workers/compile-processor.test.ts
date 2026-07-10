@@ -7,6 +7,7 @@ import {
 } from "./compile-processor";
 import { createJobStore } from "../services/job-store";
 import type { TypstSandboxRunner } from "./typst-sandbox";
+import type { TypstCompileProject } from "@depress/transformers";
 
 const validPayload = () => ({
   jobId: randomUUID(),
@@ -35,7 +36,8 @@ const validPayload = () => ({
 });
 
 function fakeSandbox(
-  impl: (source: string) => Promise<Buffer> = async () => Buffer.from("%PDF"),
+  impl: (project: TypstCompileProject) => Promise<Buffer> = async () =>
+    Buffer.from("%PDF"),
 ) {
   const compile = vi.fn(impl);
   const sandbox: TypstSandboxRunner = { compile };
@@ -81,15 +83,16 @@ describe("processCompileJob", () => {
     expect(uploadArtifact).not.toHaveBeenCalled();
   });
 
-  it("accepts valid references and leaves compilation behavior unchanged", async () => {
+  it("consumes valid references into the fixed bibliography sidecar", async () => {
     const { sandbox, compile } = fakeSandbox();
     const { artifacts } = fakeArtifacts();
     const payload = validPayload();
     const outcome = await processCompileJob(payload, { sandbox, artifacts });
     expect(outcome.status).toBe("succeeded");
-    // TODO #3 will consume references; this task only transports them.
-    expect(payload.references).toHaveLength(1);
     expect(compile).toHaveBeenCalledTimes(1);
+    const project = compile.mock.calls[0]?.[0];
+    expect(project?.bibliography).toContain('"smith2024":');
+    expect(project?.bibliography).toContain('title: "A Study"');
   });
 
   it("renders via renderIeeeTypstDocument and passes IEEE Typst to the sandbox", async () => {
@@ -101,12 +104,43 @@ describe("processCompileJob", () => {
     });
     expect(outcome.status).toBe("succeeded");
     expect(compile).toHaveBeenCalledTimes(1);
-    const source = compile.mock.calls[0]?.[0] ?? "";
+    const project = compile.mock.calls[0]?.[0];
+    const source = project?.main ?? "";
     // Citation goes through the transformer as #cite — never literal "[1]".
     expect(source).toContain('#cite(label("smith2024"))');
     expect(source).not.toContain("[1]");
     // Body is injected into the built-in IEEE template, not sent bare.
     expect(source).toContain("DePress Draft");
+    expect(source).toContain(
+      '#bibliography("references.yml", title: [References], style: "ieee")',
+    );
+  });
+
+  it("rejects a missing cited reference as INVALID_AST before compilation", async () => {
+    const { sandbox, compile } = fakeSandbox();
+    const { artifacts, uploadArtifact } = fakeArtifacts();
+    const outcome = await processCompileJob(
+      { ...validPayload(), references: [] },
+      { sandbox, artifacts },
+    );
+    expect(outcome).toEqual({ status: "failed", error: "INVALID_AST" });
+    expect(compile).not.toHaveBeenCalled();
+    expect(uploadArtifact).not.toHaveBeenCalled();
+  });
+
+  it("compiles citation-free payloads without an empty bibliography", async () => {
+    const { sandbox, compile } = fakeSandbox();
+    const { artifacts } = fakeArtifacts();
+    const payload = validPayload();
+    payload.ast.content = [
+      { type: "paragraph", content: [{ type: "text", text: "No citations" }] },
+    ];
+    payload.references = [];
+    const outcome = await processCompileJob(payload, { sandbox, artifacts });
+    expect(outcome.status).toBe("succeeded");
+    const project = compile.mock.calls[0]?.[0];
+    expect(project).not.toHaveProperty("bibliography");
+    expect(project?.main).not.toContain("#bibliography(");
   });
 
   it("uploads the PDF under artifacts/{jobId}.pdf and returns the key", async () => {

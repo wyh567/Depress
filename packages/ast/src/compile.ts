@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CslItemSchema } from "./csl";
+import { CslItemSchema, type CslItem } from "./csl";
 import { DocSchema, type Doc } from "./schema";
 
 // Compile contracts live in @depress/ast (Invariant #3): they cross
@@ -33,6 +33,34 @@ function uniqueReferenceIds(
   }
 }
 
+// Cross-field referential integrity for every compile boundary. Web-side
+// filtering is only a convenience: direct API clients and corrupted queue
+// payloads must also provide each cited item. Unused references are legal;
+// the transformer emits only the first-occurrence cited subset.
+function citationReferenceIntegrity(
+  doc: Doc,
+  references: readonly CslItem[],
+  ctx: z.RefinementCtx,
+): void {
+  const referenceIds = new Set(references.map((item) => item.id));
+  for (const citeKey of collectCiteKeys(doc)) {
+    if (referenceIds.has(citeKey)) continue;
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["references"],
+      message: `Missing reference for citeKey: ${citeKey}`,
+    });
+  }
+}
+
+function validateCompileReferences(
+  data: { ast: Doc; references: CslItem[] },
+  ctx: z.RefinementCtx,
+): void {
+  uniqueReferenceIds(data.references, ctx);
+  citationReferenceIntegrity(data.ast, data.references, ctx);
+}
+
 // HTTP POST /compile body. `references` is required (send [] when the doc
 // cites nothing). Missing field → validation failure — no silent default
 // that would hide a broken client. `.strict()` rejects unknown keys
@@ -45,7 +73,7 @@ export const CompileRequestSchema = z
     format: CompileFormatSchema,
   })
   .strict()
-  .superRefine((data, ctx) => uniqueReferenceIds(data.references, ctx));
+  .superRefine(validateCompileReferences);
 export type CompileRequest = z.infer<typeof CompileRequestSchema>;
 
 // BullMQ job data. Same content fields as the request plus the job id
@@ -59,7 +87,7 @@ export const CompileJobPayloadSchema = z
     format: CompileFormatSchema,
   })
   .strict()
-  .superRefine((data, ctx) => uniqueReferenceIds(data.references, ctx));
+  .superRefine(validateCompileReferences);
 export type CompileJobPayload = z.infer<typeof CompileJobPayloadSchema>;
 
 // First-occurrence order of citation citeKeys in document order.

@@ -1,7 +1,17 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`renderIeeeTypstDocument > renders a small paper into the IEEE template (snapshot) 1`] = `
-"// DePress IEEE template (immutable asset — never user-editable)
+exports[`renderIeeeTypstProject > renders immutable IEEE main source plus a fixed bibliography sidecar (snapshot) 1`] = `
+{
+  "bibliography": ""a":
+  type: Article
+  title: "Work A"
+  parent:
+    type: Periodical
+"b":
+  type: Book
+  title: "Work B"
+",
+  "main": "// DePress IEEE template (immutable asset — never user-editable)
 #set page(
   paper: "us-letter",
   margin: (x: 0.62in, top: 0.75in, bottom: 1in),
@@ -22,18 +32,13 @@ exports[`renderIeeeTypstDocument > renders a small paper into the IEEE template 
   clearance: 2em,
 )[
   #set align(center)
-  #text(size: 24pt)[DePress Draft]
+  #text(size: 24pt)[Deterministic IEEE Citations]
 ]
 
-= Introduction
-
-Structured editing is *essential* for _reproducible_ publishing #cite(label("smith2024")).
-
-== Prior Work
-
-See also #cite(label("doe-2023")) for a survey.
+A #cite(label("a")), B #cite(label("b")), A again #cite(label("a")).
 
 
-
-"
+#bibliography("references.yml", title: [References], style: "ieee")
+",
+}
 `;

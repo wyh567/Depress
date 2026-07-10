@@ -121,6 +121,25 @@ describe("POST /compile", () => {
     expect(res.json()).toMatchObject({ error: "VALIDATION_ERROR" });
   });
 
+  it("rejects a missing citation reference with a shared-contract issue", async () => {
+    const app = buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/compile",
+      payload: { ...validBody, references: [] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({
+      error: "VALIDATION_ERROR",
+      issues: [
+        {
+          path: "references",
+          message: "Missing reference for citeKey: smith2024",
+        },
+      ],
+    });
+  });
+
   it("rejects unknown compile fields such as fontSize", async () => {
     const app = buildApp();
     const res = await app.inject({
