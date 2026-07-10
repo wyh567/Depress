@@ -58,10 +58,44 @@ describe("renderIeeeTypstDocument", () => {
     expect(out).toContain('font: "Times New Roman", size: 10pt');
     expect(out).toContain("margin: (x: 0.62in, top: 0.75in, bottom: 1in)");
     expect(out).toContain('#set heading(numbering: "I.A.1)")');
+    // No metadata → backward-compatible fallback title.
     expect(out).toContain("DePress Draft");
     // No injection placeholders survive.
     expect(out).not.toContain("{{TITLE}}");
     expect(out).not.toContain("{{BODY}}");
+  });
+
+  it("uses metadata.title when present and escapes Typst specials", () => {
+    const out = renderIeeeTypstDocument({
+      type: "doc",
+      metadata: { title: "A $Study$ of #Cite" },
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "Body" }] },
+      ],
+    });
+    expect(out).toContain("A \\$Study\\$ of \\#Cite");
+    expect(out).not.toContain("DePress Draft");
+    expect(out).toContain("Body");
+  });
+
+  it("preserves authors/affiliations/abstract/keywords in AST without rendering them yet", () => {
+    // TODO #1 stores front-matter in AST; full IEEE author block layout is
+    // deferred. Title is the only metadata field injected into Typst now.
+    const doc = {
+      type: "doc",
+      metadata: {
+        title: "Real Title",
+        authors: [{ name: "Ada", affiliationIds: ["a1"] }],
+        affiliations: [{ id: "a1", name: "Lab" }],
+        abstract: "An abstract.",
+        keywords: ["AST", "Typst"],
+      },
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Hi" }] }],
+    };
+    const out = renderIeeeTypstDocument(doc);
+    expect(out).toContain("Real Title");
+    expect(out).not.toContain("An abstract.");
+    expect(out).not.toContain("Ada");
   });
 
   it("does not expose any user-controllable style parameters", () => {

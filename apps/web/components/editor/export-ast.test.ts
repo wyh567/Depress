@@ -68,6 +68,45 @@ describe("exportValidatedAst 合法文档", () => {
       content: [{ type: "text", text: "粗体", marks: ["bold"] }],
     });
   });
+
+  it("合并 metadata 到导出 AST;无 metadata 时保持兼容", () => {
+    const editorJson = {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Hi" }] }],
+    };
+    const without = exportValidatedAst(editorJson);
+    expect(without.success).toBe(true);
+    if (!without.success) throw new Error("expected success");
+    expect(without.ast.metadata).toBeUndefined();
+
+    const withMeta = exportValidatedAst(editorJson, {
+      title: "Real Title",
+      keywords: ["AST", "AST", "Typst"],
+    });
+    expect(withMeta.success).toBe(true);
+    if (!withMeta.success) throw new Error("expected success");
+    expect(withMeta.ast.metadata).toEqual({
+      title: "Real Title",
+      keywords: ["AST", "Typst"],
+    });
+    expect(withMeta.ast.content).toEqual(without.ast.content);
+  });
+
+  it("非法 metadata 阻止导出", () => {
+    const result = exportValidatedAst(
+      {
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "Hi" }] }],
+      },
+      {
+        authors: [{ name: "Ada", affiliationIds: ["missing"] }],
+        affiliations: [{ id: "aff-1", name: "Lab" }],
+      },
+    );
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("expected failure");
+    expect(result.issues.some((i) => i.path.includes("affiliationIds"))).toBe(true);
+  });
 });
 
 describe("exportValidatedAst 引用库状态不影响导出", () => {

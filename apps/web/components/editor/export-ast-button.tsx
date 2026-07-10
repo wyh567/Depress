@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useDocumentMetadata } from "@/stores/document-metadata";
 import { exportValidatedAst, type ExportResult } from "./export-ast";
 
 export function ExportAstButton({ getEditorJson }: { getEditorJson: () => unknown }) {
@@ -8,7 +9,11 @@ export function ExportAstButton({ getEditorJson }: { getEditorJson: () => unknow
   const [copyState, setCopyState] = useState<"idle" | "ok" | "failed">("idle");
 
   const handleExport = () => {
-    const exported = exportValidatedAst(getEditorJson());
+    const metadata = useDocumentMetadata.getState().toMetadataCandidate();
+    const exported =
+      metadata === undefined
+        ? exportValidatedAst(getEditorJson())
+        : exportValidatedAst(getEditorJson(), metadata);
     setResult(exported);
     setCopyState("idle");
 

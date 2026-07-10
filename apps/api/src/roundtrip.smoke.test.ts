@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { JobResponseSchema } from "@depress/ast";
+import { renderIeeeTypstDocument } from "@depress/transformers";
 import { buildApp } from "./app";
 import { CompileResponseSchema } from "./contracts";
-import { JobResponseSchema } from "@depress/ast";
 import { createBullmqCompileQueue } from "./queue/compile-queue";
 import { createBullmqJobReader } from "./services/job-reader";
 import { startCompileWorker } from "./workers/compile-worker";
@@ -27,25 +28,41 @@ describe.skipIf(process.env["DEPRESS_ROUNDTRIP_SMOKE"] !== "1")(
       });
       const worker = await startCompileWorker({ connection });
 
+      // Phase 3 TODO #1: metadata must survive Web→API→Queue→Worker and
+      // drive the IEEE title (not the "DePress Draft" fallback). PDF glyph
+      // streams are not plain-text searchable, so title injection is asserted
+      // on the Typst source; the Docker path asserts a real PDF still builds.
+      const ast = {
+        type: "doc" as const,
+        metadata: {
+          title: "Metadata Aware Round Trip",
+          authors: [{ name: "Ada Lovelace", affiliationIds: ["aff-1"] }],
+          affiliations: [{ id: "aff-1", name: "Analytical Engines Lab" }],
+          abstract: "Smoke test with document metadata.",
+          keywords: ["AST", "Typst", "smoke"],
+        },
+        content: [
+          {
+            type: "heading" as const,
+            level: 1 as const,
+            content: [{ type: "text" as const, text: "Round Trip" }],
+          },
+          {
+            type: "paragraph" as const,
+            content: [{ type: "text" as const, text: "Hello from the smoke test." }],
+          },
+        ],
+      };
+      const typstSource = renderIeeeTypstDocument(ast);
+      expect(typstSource).toContain("Metadata Aware Round Trip");
+      expect(typstSource).not.toContain("DePress Draft");
+
       try {
         const post = await app.inject({
           method: "POST",
           url: "/compile",
           payload: {
-            ast: {
-              type: "doc",
-              content: [
-                {
-                  type: "heading",
-                  level: 1,
-                  content: [{ type: "text", text: "Round Trip" }],
-                },
-                {
-                  type: "paragraph",
-                  content: [{ type: "text", text: "Hello from the smoke test." }],
-                },
-              ],
-            },
+            ast,
             templateId: "ieee",
             format: "pdf",
             references: [],

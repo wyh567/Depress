@@ -3,7 +3,7 @@
 ## Status
 - Current Phase: **3**
 - Phase 2: **COMPLETE**
-- Last Updated: 2026-07-09（Phase 3 TODO #2 bibliography compile contract 完成；TODO #3 待做）
+- Last Updated: 2026-07-10（Phase 3 TODO #1 document metadata 完成；TODO #3 待做）
 
 ## Phase 1 — Editor Core & AST Contract
 Goal: A working structured editor that emits validated AST JSON. No backend yet.
@@ -93,10 +93,11 @@ Goal: Deployable portfolio product.
 > 原则：schema-first；每个边界重新 Zod 校验；citation 只存 citeKey（Invariant #2）；模板不可变（Invariant #4）；DOI/网络不得进入 Typst sandbox（Invariant #5）。Figure/Table 实体化、Auth、Postgres **不在本阶段**。
 
 ### TODO #1 — Document metadata in AST
+- [x] **COMPLETE (2026-07-10):** `DocMetadataSchema`（title/authors/affiliations/abstract/keywords，`.strict()`；affiliation id 唯一；author→affiliation 引用校验；keywords trim + 首次出现去重）；`DocSchema.metadata` **optional**（无 metadata 旧文档仍合法，IEEE title 回退 `"DePress Draft"`）；web `DocumentMetadataPanel` + Zustand draft → export/compile 合并进 AST；`renderIeeeTypstDocument` 使用 `metadata.title`。**未做** 完整 IEEE 作者/单位排版、bibliography（TODO #3）。
 - **Goal:** Doc 携带 title / authors / affiliations / abstract / keywords；IEEE PDF 标题不再使用 `"DePress Draft"`。
 - **Scope:** `DocSchema` 扩展 metadata（Zod + `z.infer`）；editor 最小 metadata 编辑/导出；`renderIeeeTypstDocument` 从 AST 读 title；更新 snapshot。
 - **Files likely affected:** `packages/ast/src/schema.ts` (+tests)；`apps/web` editor export / 可选 metadata UI；`packages/transformers/src/render-ieee-typst-document.ts` (+snapshots)；`apps/api` 若依赖 Doc 形状的测试。
-- **Data contract change:** `DocSchema` 增加 metadata 块。**Backward compat 决策（必须在实现 PR 写明）：** 推荐 `metadata` optional + title 缺省时 worker 使用安全占位或拒绝编译（二选一，禁止静默丢字段）。
+- **Data contract change:** `DocSchema` 增加 metadata 块。**Backward compat 决策：** `metadata` optional；title 缺省时 renderer 使用安全占位 `"DePress Draft"`（禁止静默丢字段）。
 - **Test requirements:** AST 正/负例；export 含 metadata；IEEE render snapshot 断言真实 title；旧无-metadata fixture 行为符合决策。
 - **Acceptance criteria:** 合法 Doc 可携带 metadata；IEEE 渲染输出含 AST title；无 font/color 等表现字段进入 schema。
 - **Explicit non-goals:** 多作者复杂排版 UI；affiliations 脚注视觉微调；Postgres 持久化。

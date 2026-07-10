@@ -99,20 +99,29 @@ describe("runCompileExport — 预检(Guardrail #3)", () => {
         downloadUrl: "https://s3.test/a.pdf",
       });
     }) as unknown as typeof fetch;
-    await runCompileExport(validEditorJson(), deps(fetchFn));
+    await runCompileExport(
+      validEditorJson(),
+      deps(fetchFn, {
+        metadata: { title: "From Metadata" },
+      }),
+    );
 
     const [, init] = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [
       string,
       RequestInit,
     ];
     const sent = JSON.parse(String(init.body)) as {
-      ast: { content: { content: unknown[] }[] };
+      ast: {
+        metadata?: { title?: string };
+        content: { content: unknown[] }[];
+      };
       references: CslItem[];
       templateId: string;
       format: string;
     };
     expect(sent.templateId).toBe("ieee");
     expect(sent.format).toBe("pdf");
+    expect(sent.ast.metadata?.title).toBe("From Metadata");
     // citation 的 citeKey 已从 attrs 提升到顶层(幽灵编辑器状态被剥离)。
     expect(sent.ast.content[0]?.content[1]).toEqual({
       type: "citation",

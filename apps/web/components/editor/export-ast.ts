@@ -1,4 +1,4 @@
-import { parseDoc, type Doc } from "@depress/ast";
+import { parseDoc, type Doc, type DocMetadata } from "@depress/ast";
 import { pmDocToAst } from "./pm-doc-to-ast";
 
 export interface ExportIssue {
@@ -10,19 +10,26 @@ export type ExportResult =
   | { success: true; ast: Doc; formatted: string }
   | { success: false; issues: ExportIssue[] };
 
-// 导出边界:editor.getJSON() → pmDocToAst(...) → 再显式 safeParse 一次
-// (Doc schema)。pmDocToAst 内部已经 parseDoc,但导出边界自己再校验一次
-// 是有意为之——它不依赖被适配器的实现细节吞掉,任何未来改动只要破坏了
-// AST 契约,这里都会独立发现并可见地报出 path/message。
-export function exportValidatedAst(editorJson: unknown): ExportResult {
-  let ast: Doc;
+// 导出边界:editor.getJSON() → pmDocToAst(...) → 合并可选 metadata →
+// 再显式 safeParse 一次(Doc schema)。metadata 来自文档元数据面板/store,
+// 不是 Tiptap 正文的一部分。
+export function exportValidatedAst(
+  editorJson: unknown,
+  metadata?: DocMetadata,
+): ExportResult {
+  let bodyAst: Doc;
   try {
-    ast = pmDocToAst(editorJson);
+    bodyAst = pmDocToAst(editorJson);
   } catch (error) {
     return { success: false, issues: extractIssues(error) };
   }
 
-  const boundaryCheck = parseDoc(ast);
+  const candidate =
+    metadata === undefined
+      ? bodyAst
+      : { type: "doc" as const, metadata, content: bodyAst.content };
+
+  const boundaryCheck = parseDoc(candidate);
   if (!boundaryCheck.success) {
     return {
       success: false,

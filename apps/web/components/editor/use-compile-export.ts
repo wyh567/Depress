@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ExportIssue } from "./export-ast";
 import { runCompileExport, type CompileExportDeps } from "./compile-export";
 import { useReferenceLibrary } from "@/stores/reference-library";
+import { useDocumentMetadata } from "@/stores/document-metadata";
 
 // 状态机:idle → compiling → polling → success | error(校验失败归入
 // error,附 issues)。逻辑全在 runCompileExport(纯函数,已单测);这里
@@ -57,14 +58,16 @@ export function useCompileExport(options: {
 
     async function doExport() {
       const signal = abortRef.current;
-      // Snapshot the library at click time — do not hold a live store
-      // reference across the async poll loop, and never mutate it.
+      // Snapshot library + metadata at click time — never mutate stores.
       const library = deps?.library ?? useReferenceLibrary.getState().items;
+      const metadata =
+        deps?.metadata ?? useDocumentMetadata.getState().toMetadataCandidate();
       const result = await runCompileExport(getEditorJson(), {
         apiUrl: process.env["NEXT_PUBLIC_API_URL"] ?? "http://localhost:3001",
         signal,
         ...deps,
         library,
+        ...(metadata !== undefined ? { metadata } : {}),
         onPhase: (phase) => {
           if (!signal.aborted) setState({ phase });
         },

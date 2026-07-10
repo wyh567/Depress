@@ -4,6 +4,7 @@ import { EditorContent } from "@tiptap/react";
 import { useCallback, useState } from "react";
 import { useReferenceLibrary } from "@/stores/reference-library";
 import { CitationPrompt } from "./citation-prompt";
+import { DocumentMetadataPanel } from "./document-metadata-panel";
 import { ExportAstButton } from "./export-ast-button";
 import { ExportPdfButton } from "./export-pdf-button";
 import { useDepressEditor } from "./use-depress-editor";
@@ -39,6 +40,7 @@ export function EditorArea() {
           <ExportPdfButton getEditorJson={() => editor?.getJSON()} />
         </div>
       </div>
+      <DocumentMetadataPanel />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <EditorContent
           editor={editor}

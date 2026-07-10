@@ -2,6 +2,7 @@ import {
   CompileRequestSchema,
   JobResponseSchema,
   type CslItem,
+  type DocMetadata,
 } from "@depress/ast";
 import { exportValidatedAst, type ExportIssue } from "./export-ast";
 import { selectCitedReferences } from "./select-cited-references";
@@ -25,6 +26,8 @@ export interface CompileExportDeps {
   // Snapshot of the local reference library at export time (read-only).
   // Production wires Zustand; tests inject fixtures. Never mutated here.
   library: readonly CslItem[];
+  // Optional document metadata snapshot (from the metadata panel/store).
+  metadata?: DocMetadata;
   fetchFn?: typeof fetch;
   pollIntervalMs?: number;
   timeoutMs?: number;
@@ -52,7 +55,7 @@ export async function runCompileExport(
 
   // Guardrail #3:pmDocToAst 清洗(剥离 PM attrs/marks 形态)+ DocSchema
   // 严格校验,失败绝不发请求。
-  const exported = exportValidatedAst(editorJson);
+  const exported = exportValidatedAst(editorJson, deps.metadata);
   if (!exported.success) {
     return { outcome: "validation_error", issues: exported.issues };
   }
