@@ -17,6 +17,7 @@ async function main(): Promise<void> {
     queue: createBullmqCompileQueue(connection),
     jobs: createBullmqJobReader(connection),
     signArtifactUrl: (key) => s3.getSignedDownloadUrl(key),
+    ...(env.CROSSREF_MAILTO ? { crossrefMailto: env.CROSSREF_MAILTO } : {}),
   });
   // Browser calls cross origins (web on :3000, API on :3001); only the
   // configured web origin is allowed.

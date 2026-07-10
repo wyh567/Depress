@@ -3,7 +3,7 @@
 ## Status
 - Current Phase: **3**
 - Phase 2: **COMPLETE**
-- Last Updated: 2026-07-10（Phase 3 TODO #3 IEEE citation & bibliography engine 完成；Phase 3 仍进行中）
+- Last Updated: 2026-07-10（Phase 3 TODO #4 DOI/Crossref 完成；TODO #5–#7 待做）
 
 ## Phase 1 — Editor Core & AST Contract
 Goal: A working structured editor that emits validated AST JSON. No backend yet.
@@ -135,6 +135,18 @@ Goal: Deployable portfolio product.
 - **Risks:** Typst 0.15 bibliography 能力边界；中文作者；与未来 citeproc 双栈（若 #6 需要 Pandoc）。
 
 ### TODO #4 — DOI lookup (Crossref → CSL-JSON)
+- [x] **COMPLETE (2026-07-10):** Web → Fastify 薄 BFF → 固定源 Crossref；`POST /references/doi/lookup`；`normalizeDoi`（ASCII 小写规范形，DOI Handbook 大小写不敏感 + Crossref 可访问性建议）；`CslItem.id`/`DOI` = 规范化 DOI；同 id / 同 DOI 不覆盖（`tryAdd` + 请求前后双重检测）；provider Zod 仅校验消费字段；`crossrefWorkToCslItem` 纯映射；安全错误码；单测全 mock。**未做** 标题/作者搜索、批量 DOI、持久化。
+- **Decision log:**
+  - **BFF:** `apps/api` 代理 Crossref（浏览器不直连）；非 compile job；不进 worker/sandbox。
+  - **Route:** `POST /references/doi/lookup` body `{ doi }`（`.strict()`）。
+  - **Origin:** `https://api.crossref.org`（代码常量）；仅 `encodeURIComponent(doi)` 进 path。
+  - **Case policy:** 去前缀后对 Basic Latin 做 ASCII lower；最大输入 512。
+  - **Timeout / retry:** 8s/次 AbortController；最多 2 次；仅网络错误 / 429 / 5xx；Retry-After 封顶 2s。
+  - **mailto:** 可选 `CROSSREF_MAILTO`（非密钥；生产建议设置 polite pool）。
+  - **Type map:** journal-article→article-journal；book/monograph/reference-book→book；book-chapter→chapter；proceedings-article→paper-conference；dissertation→thesis；**posted-content→document**（预印本/eprint，不用 webpage，避免 Hayagriva Web 误导）；未知→document。
+  - **Date precedence:** published-print → published-online → published → issued。
+  - **Errors:** INVALID_DOI / DOI_NOT_FOUND / CROSSREF_TIMEOUT / CROSSREF_RATE_LIMITED / CROSSREF_UNAVAILABLE / INVALID_CROSSREF_METADATA（无上游原文泄露）。
+  - **Tests:** ast/api/web 定向单测通过；`pnpm lint` / `pnpm typecheck` / `pnpm test` 全绿；live smoke `DEPRESS_CROSSREF_SMOKE=1` 对 `10.1037/0003-066x.59.1.29` 通过。
 - **Goal:** 用户输入 DOI → 规范化 → Crossref → 校验 → 映射为 `CslItem` → 写入 reference library。
 - **Scope:** web（或薄 BFF）Crossref client；timeout/retry；可读错误；fixture 驱动单测（**单测禁止真实网络**）；不在 Typst sandbox 内发请求。
 - **Files likely affected:** `apps/web/components/library/*`；可选 `apps/api` 代理路由（若需躲 CORS）；`packages/ast` 仅当映射需要新字段。

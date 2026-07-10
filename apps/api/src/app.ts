@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { createJobStore, type JobStore } from "./services/job-store";
 import { registerCompileRoute } from "./routes/compile";
 import { registerJobsRoute, type ArtifactUrlSigner } from "./routes/jobs";
+import { registerReferencesDoiRoute } from "./routes/references-doi";
 import {
   createInMemoryCompileQueue,
   type CompileQueue,
@@ -10,6 +11,7 @@ import {
   createStoreJobReader,
   type JobReader,
 } from "./services/job-reader";
+import type { CrossrefClient } from "./services/crossref/crossref-client";
 
 // buildApp never listens on a port — callers (tests via app.inject, a future
 // server entrypoint via app.listen) decide that. Each app gets its own job
@@ -24,6 +26,8 @@ import {
 // /jobs/:id reflects real BullMQ state (API and worker share no memory —
 // Redis is the only shared source of truth); without it, reads fall back to
 // the in-memory store, which only ever sees "queued" (dev/test seam).
+// crossref is injectable for DOI lookup tests; production uses the default
+// fixed-origin client (optional CROSSREF_MAILTO via server entrypoint).
 export function buildApp(
   options: {
     queue?: CompileQueue;
@@ -32,6 +36,9 @@ export function buildApp(
     // Test seam: lets integration tests drive job state transitions the way
     // the worker's outcome would appear through a real reader.
     store?: JobStore;
+    crossref?: CrossrefClient;
+    crossrefMailto?: string;
+    fetchFn?: typeof fetch;
   } = {},
 ): FastifyInstance {
   const app = Fastify();
@@ -40,6 +47,11 @@ export function buildApp(
   const jobs = options.jobs ?? createStoreJobReader(store);
   registerCompileRoute(app, store, queue);
   registerJobsRoute(app, jobs, options.signArtifactUrl);
+  registerReferencesDoiRoute(app, {
+    ...(options.crossref ? { crossref: options.crossref } : {}),
+    ...(options.crossrefMailto ? { mailto: options.crossrefMailto } : {}),
+    ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
+  });
   return app;
 }
 

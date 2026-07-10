@@ -3,6 +3,7 @@
 import { useReferenceLibrary } from "@/stores/reference-library";
 import { AddReferenceForm } from "./add-reference-form";
 import { BibtexImport } from "./bibtex-import";
+import { DoiImport } from "./doi-import";
 import { formatAuthors, formatYear } from "./format-reference";
 
 export function LibraryPanel() {
@@ -15,6 +16,7 @@ export function LibraryPanel() {
         引用库
       </h2>
       <div className="min-h-0 flex-1 overflow-y-auto">
+        <DoiImport />
         <BibtexImport />
         <AddReferenceForm />
         <ul className="p-3">
