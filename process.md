@@ -179,7 +179,7 @@ Goal: Deployable portfolio product.
 - [x] **COMPLETE (2026-07-11):** Web 模板切换 + Phase 3 exit smoke。`ExportPdfButton` 使用**本地** `templateId` state（默认 `ieee`）；选项 `ieee` / `elsevier` / `gbt7714`；类型来自 `@depress/ast` 的 `CompileTemplateId`；DOM 值经 `CompileTemplateIdSchema.safeParse`，未知值不进入请求；`runCompileExport` 的 `templateId` **必填**；POST 前 `CompileRequestSchema` 最终重校验。模板选择**不进入** AST / metadata / references / Tiptap JSON / Zustand document state。
   - **Acceptance（仓库原文）:** 不改正文 AST，仅切换模板，得到三份版式不同、引用正确的 PDF。
   - **非目标 / 非 blocker:** IEEE 完整 authors / affiliations / abstract / keywords 排版属于 TODO #1 已知范围（当时仅要求 `metadata.title`），**不是** TODO #7 验收项，**不是** Phase 3 exit blocker，**不是**回归。
-  - **Phase 3 exit smoke (`DEPRESS_PHASE3_SMOKE=1`):** 同一 AST + 同一 references，仅 `templateId` 改变，顺序 ieee → elsevier → gbt7714。真实链路：Fastify → BullMQ → Redis → Worker → generic renderer → Typst 0.15 Docker sandbox → MinIO → signed URL → PDF。三份均 `%PDF-`；字节 IEEE 24,611 / Elsevier 24,643 / GB/T 26,477；三份 SHA-256 不同（字节/哈希差异 ≠ 视觉验证声明）。AST 与 references 未修改。
+  - **Phase 3 exit smoke (`DEPRESS_PHASE3_EXIT_SMOKE=1`):** 同一 AST + 同一 references，仅 `templateId` 改变，顺序 ieee → elsevier → gbt7714。真实链路：Fastify → BullMQ → Redis → Worker → generic renderer → Typst 0.15 Docker sandbox → MinIO → signed URL → PDF。三份均 `%PDF-`；字节 IEEE 24,611 / Elsevier 24,643 / GB/T 26,477；三份 SHA-256 不同（字节/哈希差异 ≠ 视觉验证声明）。AST 与 references 未修改。
   - **视觉抽检（人工）:**
     - **IEEE:** title 可见；body 可见；数字 citation `[1] [2] [1] [3]`；编号 References 可见；中文 reference glyph 正常；unused reference 未出现；无 tofu / 裁切 / 重叠 / placeholder。**已知范围：** 完整 IEEE authors、affiliations、abstract、keywords 排版不在 TODO #7 / Phase 3 exit 范围内（TODO #1 仅注入 title）。
     - **Elsevier:** 单栏 author-date manuscript；authors / affiliations / Abstract / Keywords 可见；author-date citations 可见；References 可见；unused reference 未出现；无 tofu / 裁切 / 重叠 / placeholder。
@@ -189,7 +189,7 @@ Goal: Deployable portfolio product.
 - **Scope:** web template 选择 UI（最小：下拉/按钮组）；`compile-export` 传所选 `templateId`；按钮文案不再写死 IEEE；exit smoke：同一 fixture 三角导出 + 引用抽检。
 - **Files likely affected:** `apps/web/components/editor/*`；`compile-export.ts`；api 已支持三 id；`process.md` 关闭 Phase 3。
 - **Data contract change:** 无（消费既有 union）。
-- **Test requirements:** UI/hook 单测；契约；可选 `DEPRESS_ROUNDTRIP_SMOKE` 扩展或独立 `DEPRESS_PHASE3_SMOKE`。
+- **Test requirements:** UI/hook 单测；契约；可选 `DEPRESS_ROUNDTRIP_SMOKE` 扩展或独立 `DEPRESS_PHASE3_EXIT_SMOKE`。
 - **Acceptance criteria:** 不改正文 AST，仅切换模板，得到三份版式不同、引用正确的 PDF。
 - **Explicit non-goals:** 模板市场上传；逐页视觉回归平台；IEEE 完整 metadata 封面排版。
 - **Dependencies:** #2–#6 全部完成。
