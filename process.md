@@ -3,7 +3,7 @@
 ## Status
 - Current Phase: **3**
 - Phase 2: **COMPLETE**
-- Last Updated: 2026-07-10（Phase 3 TODO #5 Elsevier immutable compilation path 完成；TODO #6–#7 待做）
+- Last Updated: 2026-07-11（Phase 3 TODO #6 GB/T 7714 native compilation path 完成；TODO #7 待做）
 
 ## Phase 1 — Editor Core & AST Contract
 Goal: A working structured editor that emits validated AST JSON. No backend yet.
@@ -163,17 +163,15 @@ Goal: Deployable portfolio product.
   - **CJK support:** the pinned `ghcr.io/typst/typst:0.15.0` image is given a fixed read-only, code-owned `Noto Sans CJK SC` fallback font (SIL OFL 1.1); compile input cannot choose fonts or paths. This preserves Chinese semantic content in generated PDFs.
   - **Validation:** lint 5/5 packages; typecheck 5/5 packages; full test suite 36 files (32 passed, 4 skipped), 312 passed tests, and 6 opt-in tests skipped by default. One-time real-chain smokes passed for IEEE round trip (1.58s), IEEE citations (1.55s), and Elsevier (1.63s): Fastify → BullMQ/Redis → worker → Typst 0.15 → MinIO → signed download → `%PDF-`. Local validation only: this Windows host reserved Compose ports 9000/9001, so the smoke MinIO endpoint temporarily used port 9100; default Compose ports and production configuration were unchanged.
   - **Artifact + visual inspection:** `output/pdf/phase3-elsevier-smoke.pdf` (23,504 bytes) visually inspected after Poppler rendering: single-column layout, title, ordered authors/affiliations, Abstract, Keywords, author-date citations, cited-only References, Chinese glyphs, and no clipping, overlap, or unresolved placeholders.
-  - **Limitations:** no user-controlled template/style/layout fields; web remains fixed at `templateId: "ieee"` with `Export PDF (IEEE)`; template-selection UI remains TODO #7. GB/T remains TODO #6.
+  - **Limitations:** no user-controlled template/style/layout fields; web remains fixed at `templateId: "ieee"` with `Export PDF (IEEE)`; template-selection UI remains TODO #7.
 ### TODO #6 — GB/T 7714-2015
-- **Goal:** 中文期刊模板 + GB/T 7714-2015 参考文献（中英作者、中文标点；覆盖 journal/book/conference/thesis/webpage）。
-- **Scope:** immutable GB/T 模板；书目样式（Typst 原生或 Pandoc+CSL——**实现前必须 spike 并写入本 TODO 决策**）；`templateId: "gbt7714"`；中文标点与作者 `literal` 路径测试。
-- **Files likely affected:** `packages/templates/gbt7714`；transformers；可能引入 `.csl` 资产或 Pandoc 路径（若 spike 证明 Typst 不足）；api/worker；大量 snapshot。
-- **Data contract change:** `templateId` 再扩展；若走 Pandoc，worker 沙箱镜像/工具链变更须单独评审（默认尽量不改 Docker 架构）。
-- **Test requirements:** 各文献类型 fixture；中英作者；确定性；禁止网络。
-- **Acceptance criteria:** 同一 Doc+references → GB/T PDF，参考文献符合 7714 关键抽样规则（实现 PR 附对照表）。
-- **Explicit non-goals:** 所有 GB/T 子类型穷尽；DOCX 导出（Phase 4）。
-- **Dependencies:** #2 + #3；#5 可并行但建议 IEEE 管道稳定后再做。
-- **Risks:** **本阶段最大技术风险**——GB/T 对 citeproc/CSL 依赖强，可能倒逼 Pandoc 路径，冲击 Invariant #5 沙箱设计。
+- [x] **COMPLETE (2026-07-11):** Native Typst route approved by a pinned `ghcr.io/typst/typst:0.15.0` technical spike and implemented as the third immutable shared-contract template: `CompileTemplateIdSchema` accepts only `"ieee" | "elsevier" | "gbt7714"`; `renderTypstProject` still validates once, collects citeKeys once, selects the first-occurrence cited subset once, serializes one deterministic Hayagriva sidecar once, then exhaustively dispatches to IEEE, Elsevier, or GB/T.
+  - **GB/T renderer:** code-owned A4, single-column Chinese manuscript asset with fixed typography and the existing read-only `Noto Sans CJK SC` fallback. Semantic AST metadata supplies title, ordered authors and affiliations, affiliation markers, 摘要, 关键词, body, and only an optional bibliography. The exact fixed Typst style is `gb-7714-2015-numeric`; no user-controlled style, Typst, CSL, font, or layout was added. Citation-free documents mount no bibliography; missing cited references remain rejected; unused references are omitted; the shared order is first citation occurrence.
+  - **Bibliography data:** the shared deterministic Hayagriva serializer now preserves the first valid `issued.date-parts` tuple as `YYYY`, `YYYY-MM`, or `YYYY-MM-DD`, including zero-padded month/day. The sampled native path covers article-journal, book, paper-conference, thesis, and webpage references, including Chinese literal and mixed-script authors.
+  - **Architecture:** no Pandoc, citeproc, vendored CSL, package dependency, Docker image, Compose default, sandbox policy, worker production branch, or Web template-selector work was introduced. API and queue use the shared schema; worker compilation remains generic.
+  - **Validation:** lint 5/5 packages; typecheck 5/5 packages; full test suite 33 files passed, 324 tests passed, 7 opt-in tests skipped by default. Real-chain smokes passed: IEEE round trip (1.654s), IEEE citations (1.593s), Elsevier (1.574s), and GB/T (1.566s): Fastify → BullMQ/Redis → worker → pinned Typst 0.15 Docker sandbox → MinIO → signed URL → `%PDF-`. Local validation used `S3_ENDPOINT=http://localhost:9100` only because ports 9000/9001 were reserved; Compose defaults were unchanged.
+  - **Artifact + visual inspection:** `output/pdf/phase3-gbt7714-smoke.pdf` (49,173 bytes) was rendered and opened. It shows the A4 one-column layout, Chinese title, Chinese and English authors, affiliations, 摘要, 关键词, stable numeric A-B-A-C citations, cited-only numbered 参考文献, all five sampled source categories, full webpage date `2025-06-15`, CJK glyphs, and no clipping, overlap, tofu, or unresolved placeholders.
+  - **Limitation:** key-rule validation is sampled; complete normative GB/T punctuation conformance is not claimed.
 
 ### TODO #7 — Template switcher + Phase 3 exit smoke
 - **Goal:** 同一文档一键导出 IEEE / Elsevier / GB/T 三份 PDF；满足 Phase 3 退出标准。

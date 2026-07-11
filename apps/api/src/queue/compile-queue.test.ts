@@ -124,3 +124,17 @@ describe("Elsevier queue contract", () => {
     expect(queue.payloads[0]?.templateId).toBe("elsevier");
   });
 });
+
+describe("GB/T queue contract", () => {
+  it("preserves templateId: gbt7714 in the validated queue payload", async () => {
+    const queue = createInMemoryCompileQueue();
+    const app = buildApp({ queue });
+    const res = await app.inject({
+      method: "POST",
+      url: "/compile",
+      payload: { ...validBody, templateId: "gbt7714" },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(queue.payloads[0]?.templateId).toBe("gbt7714");
+  });
+});

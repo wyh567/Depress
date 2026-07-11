@@ -6,6 +6,7 @@ import {
 import { AstValidationError } from "./ast-to-typst";
 import { cslItemsToHayagriva } from "./csl-items-to-hayagriva";
 import { renderValidatedElsevierTypstDocument } from "./render-elsevier-typst-document";
+import { renderValidatedGbt7714TypstDocument } from "./render-gbt7714-typst-document";
 import { renderValidatedIeeeTypstDocument } from "./render-ieee-typst-document";
 import type { TypstCompileProject } from "./typst-compile-project";
 
@@ -35,6 +36,8 @@ function renderTemplate(
       return renderValidatedIeeeTypstDocument(ast, withBibliography);
     case "elsevier":
       return renderValidatedElsevierTypstDocument(ast, withBibliography);
+    case "gbt7714":
+      return renderValidatedGbt7714TypstDocument(ast, withBibliography);
   }
   return assertNever(templateId);
 }
@@ -80,4 +83,11 @@ export function renderElsevierTypstProject(input: {
   references: unknown;
 }): TypstCompileProject {
   return renderTypstProject({ ...input, templateId: "elsevier" });
+}
+
+export function renderGbt7714TypstProject(input: {
+  ast: unknown;
+  references: unknown;
+}): TypstCompileProject {
+  return renderTypstProject({ ...input, templateId: "gbt7714" });
 }

@@ -89,6 +89,16 @@ describe("POST /compile", () => {
     });
     expect(res.statusCode).toBe(202);
   });
+
+  it("accepts GB/T through the shared compile route", async () => {
+    const app = buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/compile",
+      payload: { ...validBody, templateId: "gbt7714" },
+    });
+    expect(res.statusCode).toBe(202);
+  });
   it("rejects an unknown format", async () => {
     const app = buildApp();
     const res = await app.inject({

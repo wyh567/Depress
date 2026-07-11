@@ -31,7 +31,7 @@ const validRef = {
 };
 
 describe("CompileRequestSchema", () => {
-  it.each(["ieee", "elsevier"] as const)(
+  it.each(["ieee", "elsevier", "gbt7714"] as const)(
     "accepts templateId %s with a valid AST plus references",
     (templateId) => {
       const result = CompileRequestSchema.safeParse({

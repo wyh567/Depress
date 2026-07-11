@@ -8,7 +8,7 @@ exports[`cslItemsToHayagriva > serializes every supported CSL type and field in 
     - name: "Smith"
       given-name: "Alice"
     - name: "中国科学院"
-  date: 2024
+  date: 2024-05-01
   page-range: "10-20"
   serial-number:
     doi: "10.1000/example.1"

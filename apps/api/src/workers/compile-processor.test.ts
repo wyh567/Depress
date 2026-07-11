@@ -260,3 +260,18 @@ describe("Elsevier worker dispatch", () => {
     expect(source).toContain('style: "elsevier-harvard"');
   });
 });
+
+describe("GB/T worker dispatch", () => {
+  it("passes the immutable GB/T project to the sandbox without worker-specific logic", async () => {
+    const { sandbox, compile } = fakeSandbox();
+    const { artifacts } = fakeArtifacts();
+    const outcome = await processCompileJob(
+      { ...validPayload(), templateId: "gbt7714" },
+      { sandbox, artifacts },
+    );
+    expect(outcome.status).toBe("succeeded");
+    const source = compile.mock.calls[0]?.[0]?.main ?? "";
+    expect(source).toContain("DePress GB/T 7714-2015 numeric manuscript template");
+    expect(source).toContain('style: "gb-7714-2015-numeric"');
+  });
+});

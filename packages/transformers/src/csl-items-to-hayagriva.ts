@@ -56,6 +56,20 @@ function appendScalar(
   if (value !== undefined) lines.push(`${indent}${field}: ${yamlString(value)}`);
 }
 
+function formatIssuedDate(item: CslItem): string | undefined {
+  const parts = item.issued?.["date-parts"][0];
+  if (parts === undefined) return undefined;
+  const year = parts[0];
+  if (year === undefined) return undefined;
+
+  const month = parts[1];
+  const day = parts[2];
+  let value = String(year);
+  if (month !== undefined) value += `-${String(month).padStart(2, "0")}`;
+  if (day !== undefined) value += `-${String(day).padStart(2, "0")}`;
+  return value;
+}
+
 function appendParent(lines: string[], item: CslItem): void {
   const requiredType = REQUIRED_PARENT_TYPE[item.type];
   const hasContainer = item["container-title"] !== undefined;
@@ -80,8 +94,8 @@ function appendItem(lines: string[], item: CslItem): void {
   lines.push(`  title: ${yamlString(item.title)}`);
   appendAuthors(lines, item.author ?? []);
 
-  const year = item.issued?.["date-parts"][0]?.[0];
-  if (year !== undefined) lines.push(`  date: ${year}`);
+  const issuedDate = formatIssuedDate(item);
+  if (issuedDate !== undefined) lines.push(`  date: ${issuedDate}`);
   appendScalar(lines, "  ", "page-range", item.page);
   if (item.DOI !== undefined) {
     lines.push("  serial-number:");

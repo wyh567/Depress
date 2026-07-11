@@ -117,6 +117,40 @@ describe("cslItemsToHayagriva", () => {
     ).toBe('"minimal":\n  type: Misc\n  title: "Minimal"\n');
   });
 
+  it("preserves the first valid CSL issued date tuple at its available precision", () => {
+    const yaml = cslItemsToHayagriva([
+      {
+        id: "year",
+        type: "document",
+        title: "Year only",
+        issued: { "date-parts": [[2025]] },
+      },
+      {
+        id: "year-month",
+        type: "document",
+        title: "Year and month",
+        issued: { "date-parts": [[2025, 6]] },
+      },
+      {
+        id: "full-date",
+        type: "document",
+        title: "Full date 中文",
+        issued: { "date-parts": [[2025, 6, 15]] },
+      },
+      {
+        id: "no-date",
+        type: "document",
+        title: "No date 王伟",
+      },
+    ]);
+
+    expect(yaml).toContain('"year":\n  type: Misc\n  title: "Year only"\n  date: 2025\n');
+    expect(yaml).toContain('"year-month":\n  type: Misc\n  title: "Year and month"\n  date: 2025-06\n');
+    expect(yaml).toContain('"full-date":\n  type: Misc\n  title: "Full date 中文"\n  date: 2025-06-15\n');
+    expect(yaml).toContain('"no-date":\n  type: Misc\n  title: "No date 王伟"\n');
+    expect(yaml).not.toContain('"no-date":\n  type: Misc\n  title: "No date 王伟"\n  date:');
+  });
+
   it("is deterministic and does not mutate input", () => {
     const input = structuredClone(allTypes);
     const before = structuredClone(input);

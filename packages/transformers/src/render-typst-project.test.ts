@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AstValidationError } from "./ast-to-typst";
 import {
   renderElsevierTypstProject,
+  renderGbt7714TypstProject,
   renderIeeeTypstProject,
   renderTypstProject,
 } from "./render-typst-project";
@@ -43,10 +44,19 @@ describe("renderTypstProject", () => {
     expect(generic.main).toContain('style: "elsevier-harvard"');
   });
 
+  it("dispatches GB/T through its compatibility wrapper", () => {
+    const generic = renderTypstProject({ ast, references, templateId: "gbt7714" });
+    expect(generic).toEqual(renderGbt7714TypstProject({ ast, references }));
+    expect(generic.main).toContain("DePress GB/T 7714-2015 numeric manuscript template");
+    expect(generic.main).toContain('style: "gb-7714-2015-numeric"');
+  });
+
   it("uses byte-identical cited-only bibliography output", () => {
     const ieee = renderTypstProject({ ast, references, templateId: "ieee" });
     const elsevier = renderTypstProject({ ast, references, templateId: "elsevier" });
+    const gbt7714 = renderTypstProject({ ast, references, templateId: "gbt7714" });
     expect(elsevier.bibliography).toBe(ieee.bibliography);
+    expect(gbt7714.bibliography).toBe(ieee.bibliography);
     const bibliography = ieee.bibliography ?? "";
     expect(bibliography.indexOf('"a":')).toBeLessThan(bibliography.indexOf('"b":'));
     expect(bibliography.match(/^"a":/gm)).toHaveLength(1);
@@ -54,8 +64,8 @@ describe("renderTypstProject", () => {
     expect(bibliography).not.toContain("unused");
   });
 
-  it("preserves A B A citation calls for both templates", () => {
-    for (const templateId of ["ieee", "elsevier"] as const) {
+  it("preserves A B A citation calls for all templates", () => {
+    for (const templateId of ["ieee", "elsevier", "gbt7714"] as const) {
       const project = renderTypstProject({ ast, references, templateId });
       expect(project.main.match(/#cite\(label\("[^"]+"\)\)/g)).toEqual([
         '#cite(label("a"))', '#cite(label("b"))', '#cite(label("a"))',
@@ -64,7 +74,7 @@ describe("renderTypstProject", () => {
   });
 
   it("omits bibliography output for citation-free input", () => {
-    for (const templateId of ["ieee", "elsevier"] as const) {
+    for (const templateId of ["ieee", "elsevier", "gbt7714"] as const) {
       const project = renderTypstProject({
         ast: { type: "doc", content: [] },
         references,
@@ -75,8 +85,8 @@ describe("renderTypstProject", () => {
     }
   });
 
-  it("rejects missing references for both templates", () => {
-    for (const templateId of ["ieee", "elsevier"] as const) {
+  it("rejects missing references for all templates", () => {
+    for (const templateId of ["ieee", "elsevier", "gbt7714"] as const) {
       expect(() => renderTypstProject({ ast, references: [], templateId })).toThrow(
         AstValidationError,
       );

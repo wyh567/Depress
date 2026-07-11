@@ -7,7 +7,7 @@ import { DocSchema, type Doc } from "./schema";
 // upstream validation is never trusted.
 
 // Phase 3 TODO #5: built-in immutable templates share this compile contract.
-export const CompileTemplateIdSchema = z.enum(["ieee", "elsevier"]);
+export const CompileTemplateIdSchema = z.enum(["ieee", "elsevier", "gbt7714"]);
 export type CompileTemplateId = z.infer<typeof CompileTemplateIdSchema>;
 
 export const CompileFormatSchema = z.literal("pdf");

@@ -1,0 +1,40 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderGbt7714TypstDocument > renders deterministic immutable Chinese manuscript source (snapshot) 1`] = `
+"// DePress GB/T 7714-2015 numeric manuscript template -- immutable asset
+#set page(
+  paper: "a4",
+  margin: (x: 22mm, top: 20mm, bottom: 22mm),
+  columns: 1,
+)
+#set text(font: ("Libertinus Serif", "Noto Sans CJK SC"), size: 10.5pt)
+#set par(justify: true, leading: 0.65em)
+#set heading(numbering: "1.1")
+#show heading.where(level: 1): set text(size: 14pt, weight: "bold")
+#show heading.where(level: 2): set text(size: 12pt, weight: "bold")
+
+#align(center)[
+  #text(size: 22pt)[中文期刊论文：Café]
+
+  张三#super[1]，Jane Smith#super[1, 2]，独立作者
+
+  #text(size: 9pt)[#super[1] 某大学心理学院
+#super[2] Digital Health Laboratory]
+]
+
+#strong[摘要]
+
+含有 \\$、"引号"、C:\\\\docs、\\[方括号\\] 与中文标点。
+
+#strong[关键词]
+
+抑郁症；数字干预；Café
+
+= 引言
+
+中文正文。
+
+
+
+"
+`;
