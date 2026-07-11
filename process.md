@@ -2,10 +2,13 @@
 
 ## Status
 - Current Phase: **4**
+- Phase 1: **COMPLETE**
 - Phase 2: **COMPLETE**
 - Phase 3: **COMPLETE**
-- Phase 4: **NOT STARTED**
-- Last Updated: 2026-07-11（Phase 3 TODO #7 template switcher + exit smoke 完成；Phase 3 关闭）
+- Phase 4: **IN PROGRESS**
+- P4-00: **COMPLETE**
+- P4-01: **NOT STARTED**
+- Last Updated: 2026-07-11（P4-00 Architecture / Process / ADR documentation 完成；仅冻结 Phase 4 架构与范围，尚未实现 Phase 4 产品功能）
 
 ## Phase 1 — Editor Core & AST Contract
 Goal: A working structured editor that emits validated AST JSON. No backend yet.
@@ -62,13 +65,40 @@ Goal: Correct bibliographies in multiple strict styles.
 - Template switcher: same doc → different PDFs (the core demo moment)
 - **Exit criteria:** One document exports to 3 journals with correct citations.
 
-## Phase 4 — Persistence, Auth & Polish
-Goal: Deployable portfolio product.
-- Postgres persistence + document versioning
-- Auth + multi-project workspace
-- DOCX export path (Pandoc + reference.docx)
-- Landing page, deploy (Vercel + Fly.io/Railway workers)
-- **Exit criteria:** Public URL, signup → write → export works end-to-end.
+## Phase 4 — Public Persistence, Auth & Authorized Export
+
+### Phase 4 Core
+
+Goal: deliver one public, authenticated product path: **Public URL → signup/login → write → save → reload → cite → authenticated PDF export → authorized download**.
+
+Core includes:
+
+- persisted ProseMirror document envelope as the only editable canonical representation;
+- deterministic semantic Doc AST as a derived compile projection;
+- Project ownership boundary and one server-created default Project per user;
+- Project-owned References and Project-owned Documents;
+- Postgres business truth for Documents, References, Compile Jobs, artifact metadata, and outbox events;
+- Better Auth with Postgres database sessions and first-party cookies;
+- current document content/revision/hash plus sparse immutable checkpoints;
+- target compile request `{ documentId, revision, templateId, format: "pdf" }`;
+- immutable compile input snapshots and snapshot hashes;
+- transactional outbox, idempotent BullMQ job IDs, and idempotent Workers;
+- authenticated and owner-scoped Jobs, Artifacts, and signed download URLs;
+- early CI baseline, production sandbox feasibility spike, later CD/deployment, security controls, and public exit smoke.
+
+### Phase 4 Stretch
+
+The following do not block Phase 4 COMPLETE:
+
+- DOCX/Pandoc export;
+- full version-history, comparison, restore, or recycle-bin UI;
+- full multi-project workspace UI;
+- complex marketing landing, SEO, blog, or analytics;
+- collaboration, team sharing/RBAC, and advanced per-job VM isolation.
+
+### Phase 4 scope note
+
+P4-00 freezes architecture and scope only. It does not implement persistence, Auth, Postgres, the target compile path, CI, deployment, or any other Phase 4 product capability.
 
 ## Phase 1 TODO
 - [x] Init monorepo (pnpm, turbo, tsconfig strict, eslint, prettier)
@@ -203,13 +233,220 @@ Goal: Deployable portfolio product.
 5. TODO #5 → #6 → #7。
 
 ### Phase 3 Exit Criteria
-同一篇结构化文档（不改正文 AST）导出 IEEE + Elsevier + GB/T 三份 PDF，正文引用与参考文献列表正确。**已满足（2026-07-11）** — Phase 3 **COMPLETE**；Current Phase 进入 **4**（NOT STARTED，本阶段未实现 Phase 4）。
+同一篇结构化文档（不改正文 AST）导出 IEEE + Elsevier + GB/T 三份 PDF，正文引用与参考文献列表正确。**已满足（2026-07-11）** — Phase 3 **COMPLETE**；Current Phase 已进入 **4**，Phase 4 当前为 **IN PROGRESS**（P4-00 文档冻结已完成；产品功能尚未实现）。
+
+## Phase 4 TODO
+
+### P4-00 — Architecture / Process / ADR documentation
+
+- [x] **COMPLETE (2026-07-11)**
+- **Goal:** Freeze Phase 4 Core/Stretch scope, canonical data boundaries, ownership, versioning, compile snapshot consistency, Auth direction, provisional sandbox topology, dependency graph, implementation order, and exit criteria.
+- **Scope:** `architecture.md`, `process.md`, and ADR 0001–0007 only.
+- **Explicit non-goals:** CI implementation; sandbox execution; production deployment; Auth; Postgres; migrations; API, Queue, Worker, or Web features.
+- **Acceptance:** Phase 4 is `IN PROGRESS`; P4-00 is complete; all product tasks remain not started; the seven ADRs record six Accepted decisions and one Proposed topology.
+- **Result:** Architecture and scope are frozen. No Phase 4 product capability is implemented by this TODO.
+
+### P4-01 — CI baseline
+
+- [ ] **NOT STARTED**
+- **Goal:** Establish an early, repeatable pull-request quality baseline.
+- **Scope:** GitHub Actions on Linux running frozen install, lint, typecheck, default tests, and build.
+- **Explicit non-goals:** CD, production migrations, deployment, rollback, or default execution of real Docker/Crossref/infrastructure smoke tests.
+- **Acceptance:** Every PR runs the four baseline gates; existing opt-in smoke tests remain skipped unless explicitly enabled.
+
+### P4-02 — Production Docker sandbox technical spike
+
+- [ ] **NOT STARTED**
+- **Goal:** Prove or reject the provisional dedicated-Linux-VM sandbox topology before Auth implementation.
+- **Scope:** Non-production Linux environment; current fixed Typst image; Docker isolation flags; CPU/memory/pids/time limits; concurrency; restart/retry; cleanup; fonts; object-storage connectivity; API/Worker privilege separation.
+- **Explicit non-goals:** Production deployment, formal domain, production users/data, or accepted selection of any infrastructure provider.
+- **Acceptance:** ADR 0007 becomes Accepted only with reproducible evidence; failure changes it to Superseded and requires a replacement topology decision.
+
+### P4-03 — Shared persisted and API contracts
+
+- [ ] **NOT STARTED**
+- **Goal:** Add shared target schemas without interrupting the Phase 3 export path.
+- **Scope:** Persisted PM document envelope, restricted PM nodes/marks, document/reference persistence contracts, target compile request, immutable compile snapshot, minimal Queue payload, Job and Artifact responses; organize new schemas inside `packages/ast` by domain.
+- **Explicit non-goals:** Renaming `packages/ast`, splitting `@depress/contracts`, database implementation, or removing the existing raw AST compile contract.
+- **Additive migration guardrail:** P4-03 adds target schemas only. It must not delete or disable the current Phase 3 raw AST Web/API/Queue/Worker contract. The current PDF export chain remains operational until the full replacement is complete and verified in P4-09.
+- **Acceptance:** Shared schemas reject presentation fields and are consumable by both existing and target paths.
+
+### P4-04 — Postgres and migration foundation
+
+- [ ] **NOT STARTED**
+- **Goal:** Implement the logical ownership, persistence, snapshot, Job, Artifact, and outbox model in Postgres.
+- **Scope:** Physical schema decision, migrations, constraints, indexes, fresh-database migration validation, connection lifecycle.
+- **Explicit non-goals:** Locking the ORM or database vendor in P4-00; production auto-migration on application boot; full history or multi-project UI.
+- **Decision boundary:** P4-04 selects the physical representation while preserving the ADR ownership relationships, source-of-truth boundaries, invariants, and consistency model.
+- **Acceptance:** A fresh database can apply all migrations; Postgres can represent current Documents, sparse checkpoints, Project References, compile snapshots, Jobs, Artifacts, and outbox events.
+
+### P4-05 — Better Auth implementation spike and integration
+
+- [ ] **NOT STARTED**
+- **Goal:** Establish validated database sessions and the User ownership root after P4-02 succeeds.
+- **Scope:** Better Auth, Postgres sessions, HttpOnly/Secure/SameSite cookie, same-origin proxy, session validation, owner derivation, idempotent default Project creation.
+- **Implementation-spike decisions:** email/password versus OAuth, email verification policy, and any transactional email provider.
+- **Explicit non-goals:** anonymous compile, organizations, team RBAC, or full multi-project UI.
+- **Acceptance:** Protected routes reject anonymous requests; a valid session maps to exactly one ownership identity and one default Project.
+
+### P4-06 — Document and Project Reference persistence
+
+- [ ] **NOT STARTED**
+- **Goal:** Persist and authorize editable Documents and Project References.
+- **Scope:** create/list/load/save/soft-delete Documents; current content/revision/hash; optimistic concurrency; sparse creation/explicit/on-demand checkpoints; Reference CRUD and conflicts.
+- **Explicit non-goals:** checkpoint per autosave, periodic checkpoint schedule, full history UI, complex restore UI, recycle bin, or recovery guarantee.
+- **Acceptance:** An owner can save and reload the same PM envelope and References; cross-owner access fails; revision conflicts never silently overwrite data.
+
+### P4-07 — Web save, load, reload, and autosave
+
+- [ ] **NOT STARTED**
+- **Goal:** Connect the current editor, metadata, document list, and reference library to the persistence APIs.
+- **Scope:** create/select/load, debounced autosave, dirty/saving/saved/error states, revision conflict handling, and compile-time save flushing.
+- **Explicit non-goals:** offline-first, collaboration, CRDT, or full workspace UI.
+- **Acceptance:** Browser reload and re-login preserve PM content, metadata, References, and citation citeKeys; export never submits while a required save has failed.
+
+### P4-08 — Compile snapshot and transactional outbox
+
+- [ ] **NOT STARTED**
+- **Goal:** Reliably turn an authenticated document-revision request into an immutable DB snapshot and an idempotently enqueued minimal BullMQ Job.
+- **Scope:** target request `{ documentId, revision, templateId, format: "pdf" }`; authentication; owner and exact-revision checks; persisted-envelope validation; semantic Doc AST projection; cited Project Reference resolution; immutable `compile_jobs.input_snapshot`; `snapshot_hash`; initial Compile Job row; transactional enqueue outbox; dispatcher; `{ jobId, snapshotHash }` Queue payload; idempotent BullMQ Job ID; enqueue retry and reconciliation.
+- **Dependencies:** P4-03 contracts and P4-06 persisted Document/Reference backend. P4-07 may proceed in parallel but is not required to prove reliable enqueue.
+- **Consistency:** DB success plus BullMQ failure leaves a retryable outbox event. BullMQ success plus DB queued-update failure retries the same BullMQ Job ID and never moves a later DB state backwards.
+- **Explicit non-goals:** Worker Postgres load or DB claim; Worker retry; terminal success/failure writes; Typst execution; Artifact persistence; signed URL authorization; Web final compile migration; raw AST public endpoint removal.
+- **Additive migration:** The current Phase 3 raw AST export path remains operational. P4-08 must not delete or disable the old public raw compile contract.
+- **Acceptance:** The new target Compile API can reliably create one validated immutable snapshot, initial Compile Job, and outbox event and can idempotently deliver `{ jobId, snapshotHash }` to BullMQ. Document/Reference changes after acceptance cannot mutate the stored snapshot.
+
+### P4-09 — Worker, Job, Artifact persistence and final cutover
+
+- [ ] **NOT STARTED**
+- **Goal:** Complete and validate the Queue-to-authorized-download replacement chain, migrate the Web, and perform the final additive cutover.
+- **Scope:** Queue payload validation; Worker load of the trusted Compile Job and `input_snapshot` from Postgres; snapshot-hash verification; atomic DB claim; idempotent Worker retry; Postgres terminal Job truth; Typst Docker compile; deterministic S3 object key; Artifact row and checksum/expiry metadata; idempotent success/failure writes; owner-scoped Job reads; owner-scoped short-lived Artifact download URLs; Web export migration to `{ documentId, revision, templateId, format: "pdf" }`; consumption of P4-07 export-before-save flush behavior; real replacement-chain PDF, cross-user authorization, and retry/idempotency validation.
+- **Dependencies:** P4-07 Web save/load and export-flush capability plus P4-08 snapshot/outbox/Queue delivery.
+- **Explicit non-goals:** permanent artifact retention or public bucket access.
+- **Final cutover gate:** Only after the Web target request, API snapshot, outbox, BullMQ, Worker, DB Job lifecycle, Artifact persistence, and authorized PDF download replacement chain all pass may the old public raw AST compile contract be removed. An intermediate export outage is forbidden.
+- **Acceptance:** The full replacement chain produces a real authorized PDF from the exact immutable snapshot; Postgres is terminal Job truth; retries and duplicate delivery create no second logical compile; cross-user Job and Artifact access fails; the Web no longer depends on the raw AST public contract before that contract is removed.
+
+### P4-10 — Production security, health, and lifecycle controls
+
+- [ ] **NOT STARTED**
+- **Goal:** Add the minimum public-product safeguards.
+- **Scope:** authenticated compile, rate and size limits, per-user active-job limits, Worker concurrency, request/sandbox timeouts, exact origin/CSRF policy, secret management, log redaction, safe error codes, liveness/readiness, artifact `expires_at`, scheduled cleanup, object-delete retry, and S3 lifecycle backstop.
+- **Explicit non-goals:** enterprise WAF/compliance, 30-day recovery guarantee, recycle-bin UI, or a complex deletion workflow.
+- **Acceptance:** Abuse controls and cleanup are testable; expired artifacts become unavailable and object deletion retries safely.
+
+### P4-11 — CD, production migrations, deployment, and rollback
+
+- [ ] **NOT STARTED**
+- **Goal:** Deploy the verified product topology safely after Core services are ready.
+- **Scope:** migration gate, versioned deployment, secrets, health gate, post-deploy smoke, rollback, and operational runbook.
+- **Explicit non-goals:** changing the P4-02 spike into production without its go decision; auto-migration on application boot; multi-region HA.
+- **Acceptance:** A failed migration or health check prevents traffic cutover; application rollback and forward-compatible migration strategy are rehearsed.
+
+### P4-12 — Public exit E2E and minimal landing
+
+- [ ] **NOT STARTED**
+- **Goal:** Prove the complete public product path and close Phase 4.
+- **Scope:** minimal public entry and Auth navigation; automated persistence/export/authorization checks; real signup smoke; artifact validation; manual PDF visual inspection; test-data cleanup.
+- **Explicit non-goals:** complex marketing landing, SEO campaign, blog, or analytics.
+- **Acceptance:** All Phase 4 exit criteria below pass against the public deployment.
+
+### Phase 4 Dependency Graph
+
+```text
+P4-00 Architecture / Process / ADR freeze
+   |
+   +--> P4-01 CI baseline
+   |
+   +--> P4-02 sandbox technical spike
+   |       |
+   |       +------------------------------+
+   |                                      |
+   +--> P4-03 shared contracts            |
+           |                              |
+           +--> P4-04 Postgres/migrations |
+                    |                     |
+                    +--> P4-05 Auth <------+
+                             |
+                             +--> P4-06 Document/Reference persistence
+                                      |
+                                      +--> P4-07 Web save/load/flush -----+
+                                      |                                  |
+                                      +--> P4-08 snapshot/outbox/Queue ---+
+                                                                         |
+                                                                         v
+                                                          P4-09 Worker/Jobs/Artifacts/cutover
+                                                                         |
+                                                                         v
+                                                          P4-10 security/lifecycle
+                                                                         |
+P4-01 ------------------------------------------------------------------+
+P4-02 ------------------------------------------------------------------+
+                                                                         v
+                                                          P4-11 CD/deployment
+                                                                         |
+                                                                         v
+                                                          P4-12 public exit E2E
+```
+
+### Phase 4 Implementation Order
+
+1. P4-00 — Architecture / Process / ADR documentation.
+2. P4-01 — CI baseline.
+3. P4-02 — Production Docker sandbox technical spike.
+4. P4-03 — Shared persisted/API contracts.
+5. P4-04 — Postgres and migration foundation.
+6. P4-05 — Better Auth implementation spike and integration.
+7. P4-06 — Document and Project Reference persistence.
+8. P4-07 — Web save/load/reload/autosave.
+9. P4-08 — Compile snapshot, transactional outbox, and Queue delivery.
+10. P4-09 — Worker, Job, Artifact persistence and final cutover.
+11. P4-10 — Production security, health, and lifecycle controls.
+12. P4-11 — CD, production migrations, deployment, and rollback.
+13. P4-12 — Public exit E2E and minimal landing.
+
+P4-01 begins immediately after the documentation freeze. P4-02 must finish before P4-05 starts. P4-03 may overlap the tail of P4-02, but Auth implementation may not. P4-07 owns save/load and export flushing. P4-08 depends on the P4-06 persisted Document/Reference backend and may overlap P4-07. P4-09 depends on both P4-07 and P4-08 and exclusively owns the final Web/Worker/Job/Artifact cutover and raw-contract removal. P4-10 remains after P4-09. CD activation remains late even though CI is early.
+
+### Phase 4 Exit Criteria
+
+#### Product path
+
+- [ ] A public HTTPS URL is reachable.
+- [ ] A new user can complete the selected signup flow, log in, log out, and resume a valid session.
+- [ ] Signup creates exactly one default Project.
+- [ ] The user can create, write, save, close, reload, and reopen a Document without losing PM content or metadata.
+- [ ] Project References persist; inserted citations retain their `citeKey` after reload.
+- [ ] Export flushes pending saves and binds the request to an exact current revision.
+- [ ] The user can select an immutable template, request an authenticated PDF compile, and download a valid authorized PDF.
+
+#### Consistency and authorization
+
+- [ ] A Job uses the immutable snapshot and hash created at request time; later Document/Reference edits cannot change it.
+- [ ] DB-success/Queue-failure recovers through the outbox.
+- [ ] Queue-success/DB-update-failure and Worker retries do not create a second logical compile.
+- [ ] Postgres remains terminal Job truth even if Redis state is lost or evicted.
+- [ ] Anonymous compile returns 401.
+- [ ] One user cannot read or mutate another user's Projects, Documents, References, Jobs, or Artifacts, and cannot obtain their signed URLs.
+
+#### Production readiness
+
+- [ ] CI runs lint, typecheck, default tests, and build; opt-in infrastructure smoke remains skipped by default.
+- [ ] The Linux Docker sandbox spike passes and ADR 0007 is Accepted before production deployment.
+- [ ] Request/document/reference size limits, rate limits, active-job limits, Queue concurrency, and sandbox timeout are enforced.
+- [ ] Artifact expiry, scheduled cleanup, object-delete retry, and S3 lifecycle backstop are verified.
+- [ ] Secrets are absent from client bundles and logs; errors expose safe codes only.
+- [ ] Liveness/readiness, migration gate, deployment gate, post-deploy smoke, and rollback rehearsal pass.
+
+#### Public exit smoke
+
+- [ ] Public URL -> signup -> login -> create document -> enter content -> add reference -> insert citation -> save -> reload -> verify persistence -> select template -> export -> authorized valid PDF download passes end-to-end.
+- [ ] At least one production PDF is manually inspected for clipping, overlap, missing glyphs, unresolved citations, and placeholders.
+- [ ] Test data and expired artifacts are cleaned up.
 
 ## Backlog
 (Out-of-phase ideas go here — do not implement early.)
 - Figure / Table 节点实体化（caption、src/data）——非 Phase 3 退出标准
-- Zustand doc dirty/autosave 持久化（Phase 1 曾规划，代码仅有 reference-library）
-- Pandoc DOCX 路径（Phase 4）
-- Postgres document versioning / Auth（Phase 4）
+- Pandoc DOCX 路径（Phase 4 Stretch；不阻塞 Phase 4 COMPLETE）
+- 完整 version history / restore UI（Phase 4 Stretch；不阻塞 Phase 4 COMPLETE）
+- 完整 multi-project workspace UI（Phase 4 Stretch；Project 数据边界与 default Project 属于 Core）
 - 完整 CSL-JSON 全字段 / citeproc 浏览器预览
 - IEEE 完整 authors / affiliations / abstract / keywords 排版（TODO #1 已知非目标；非 Phase 3 回归）
