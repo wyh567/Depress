@@ -1,5 +1,5 @@
 import {
-  renderIeeeTypstProject,
+  renderTypstProject,
   type TypstCompileProject,
 } from "@depress/transformers";
 import { CompileJobPayloadSchema, type JobFailureCode } from "@depress/ast";
@@ -50,9 +50,10 @@ export async function processCompileJob(
   // contents. Citations remain citeKey-only until Typst applies IEEE style.
   let typstProject: TypstCompileProject;
   try {
-    typstProject = renderIeeeTypstProject({
+    typstProject = renderTypstProject({
       ast: parsed.data.ast,
       references: parsed.data.references,
+      templateId: parsed.data.templateId,
     });
   } catch {
     return { status: "failed", error: "INVALID_AST" };

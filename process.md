@@ -3,7 +3,7 @@
 ## Status
 - Current Phase: **3**
 - Phase 2: **COMPLETE**
-- Last Updated: 2026-07-10（Phase 3 TODO #4 DOI/Crossref 完成；TODO #5–#7 待做）
+- Last Updated: 2026-07-10（Phase 3 TODO #5 Elsevier immutable compilation path 完成；TODO #6–#7 待做）
 
 ## Phase 1 — Editor Core & AST Contract
 Goal: A working structured editor that emits validated AST JSON. No backend yet.
@@ -158,16 +158,12 @@ Goal: Deployable portfolio product.
 - **Risks:** Crossref 模式漂移；rate limit；DOI 与手工 id 冲突。
 
 ### TODO #5 — Elsevier template (immutable)
-- **Goal:** 同一 AST + 同一 CSL library → Elsevier PDF（确定性）。
-- **Scope:** `@depress/templates` 新增 Elsevier immutable 资产；`templateId` 扩展为 `"ieee" | "elsevier"`；processor 按 templateId 分支；citation/bibliography 样式按 Elsevier 约定（APA-like，以实现时模板内配置为准）。
-- **Files likely affected:** `packages/templates/`；`packages/ast` compile `templateId`；transformers render 入口；api/web 允许新 id；tests/snapshots。
-- **Data contract change:** `templateId` union 扩展。
-- **Test requirements:** 文本/PDF 级确定性测试；拒绝未知 templateId；与 IEEE 对照同一 fixture。
-- **Acceptance criteria:** 相同 Doc+references，仅改 templateId 得到不同版式 PDF；无用户样式参数。
-- **Explicit non-goals:** 完整 Elsevier 商业模板像素级还原；GB/T；UI switcher（#7）。
-- **Dependencies:** #2 + #3。
-- **Risks:** 样式复杂度；与 IEEE 共享 bibliography 管道时的分支爆炸。
-
+- [x] **COMPLETE (2026-07-10):** Shared `CompileTemplateIdSchema` now accepts only `"ieee" | "elsevier"`; `renderTypstProject` validates once, collects citeKeys once, selects cited references in first-occurrence order once, and serializes one deterministic Hayagriva sidecar before exhaustively dispatching to immutable IEEE or Elsevier renderers. `renderIeeeTypstProject` remains a compatibility wrapper.
+  - **Elsevier:** immutable, single-column author-date manuscript asset; exact Typst style `elsevier-harvard`; title/authors/affiliations/abstract/keywords are semantic AST content only. Missing optional sections are omitted, legacy documents fall back to `"DePress Draft"`, missing cited references are rejected, citation-free documents mount no bibliography, and unused references are omitted.
+  - **CJK support:** the pinned `ghcr.io/typst/typst:0.15.0` image is given a fixed read-only, code-owned `Noto Sans CJK SC` fallback font (SIL OFL 1.1); compile input cannot choose fonts or paths. This preserves Chinese semantic content in generated PDFs.
+  - **Validation:** lint 5/5 packages; typecheck 5/5 packages; full test suite 36 files (32 passed, 4 skipped), 312 passed tests, and 6 opt-in tests skipped by default. One-time real-chain smokes passed for IEEE round trip (1.58s), IEEE citations (1.55s), and Elsevier (1.63s): Fastify → BullMQ/Redis → worker → Typst 0.15 → MinIO → signed download → `%PDF-`. Local validation only: this Windows host reserved Compose ports 9000/9001, so the smoke MinIO endpoint temporarily used port 9100; default Compose ports and production configuration were unchanged.
+  - **Artifact + visual inspection:** `output/pdf/phase3-elsevier-smoke.pdf` (23,504 bytes) visually inspected after Poppler rendering: single-column layout, title, ordered authors/affiliations, Abstract, Keywords, author-date citations, cited-only References, Chinese glyphs, and no clipping, overlap, or unresolved placeholders.
+  - **Limitations:** no user-controlled template/style/layout fields; web remains fixed at `templateId: "ieee"` with `Export PDF (IEEE)`; template-selection UI remains TODO #7. GB/T remains TODO #6.
 ### TODO #6 — GB/T 7714-2015
 - **Goal:** 中文期刊模板 + GB/T 7714-2015 参考文献（中英作者、中文标点；覆盖 journal/book/conference/thesis/webpage）。
 - **Scope:** immutable GB/T 模板；书目样式（Typst 原生或 Pandoc+CSL——**实现前必须 spike 并写入本 TODO 决策**）；`templateId: "gbt7714"`；中文标点与作者 `literal` 路径测试。

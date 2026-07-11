@@ -1,0 +1,41 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderElsevierTypstDocument > renders the deterministic immutable manuscript template (snapshot) 1`] = `
+"// DePress Elsevier author-date manuscript template (immutable asset -- never user-editable)
+#set page(
+  paper: "us-letter",
+  margin: (x: 0.9in, top: 0.8in, bottom: 0.9in),
+  columns: 1,
+)
+#set text(font: ("Libertinus Serif", "Noto Sans CJK SC"), size: 10.5pt)
+#set par(justify: true, leading: 0.65em)
+#set heading(numbering: "1.1")
+#show heading.where(level: 1): set text(size: 14pt, weight: "bold")
+#show heading.where(level: 2): set text(size: 12pt, weight: "bold")
+
+#align(center)[
+  #text(size: 22pt)[Elsevier Manuscript — Café]
+
+  Ada Lovelace#super[1], 李华#super[1, 2], Independent Author
+
+  #text(size: 9pt)[#super[1] Compiler Systems Lab
+#super[2] 计算语言学实验室]
+]
+
+#strong[Abstract]
+
+Costs \\$5, uses "quotes", C:\\\\docs, \\[brackets\\],
+and Unicode 王伟。
+
+#strong[Keywords]
+
+AST, Café, 中文
+
+= Introduction
+
+Body text.
+
+
+
+"
+`;

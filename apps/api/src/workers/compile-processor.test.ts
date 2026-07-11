@@ -246,3 +246,17 @@ describe("processCompileJob", () => {
     expect(store.get(job.id)?.error).toBe("INVALID_AST");
   });
 });
+describe("Elsevier worker dispatch", () => {
+  it("passes the immutable Elsevier project to the sandbox", async () => {
+    const { sandbox, compile } = fakeSandbox();
+    const { artifacts } = fakeArtifacts();
+    const outcome = await processCompileJob(
+      { ...validPayload(), templateId: "elsevier" },
+      { sandbox, artifacts },
+    );
+    expect(outcome.status).toBe("succeeded");
+    const source = compile.mock.calls[0]?.[0]?.main ?? "";
+    expect(source).toContain("DePress Elsevier author-date manuscript template");
+    expect(source).toContain('style: "elsevier-harvard"');
+  });
+});

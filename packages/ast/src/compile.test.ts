@@ -31,15 +31,18 @@ const validRef = {
 };
 
 describe("CompileRequestSchema", () => {
-  it("accepts a valid AST plus references", () => {
-    const result = CompileRequestSchema.safeParse({
-      ast: validAst,
-      references: [validRef],
-      templateId: "ieee",
-      format: "pdf",
-    });
-    expect(result.success).toBe(true);
-  });
+  it.each(["ieee", "elsevier"] as const)(
+    "accepts templateId %s with a valid AST plus references",
+    (templateId) => {
+      const result = CompileRequestSchema.safeParse({
+        ast: validAst,
+        references: [validRef],
+        templateId,
+        format: "pdf",
+      });
+      expect(result.success).toBe(true);
+    },
+  );
 
   it("accepts references: []", () => {
     expect(
@@ -143,7 +146,7 @@ describe("CompileRequestSchema", () => {
       CompileRequestSchema.safeParse({
         ast: validAst,
         references: [],
-        templateId: "elsevier",
+        templateId: "acm",
         format: "pdf",
       }).success,
     ).toBe(false);

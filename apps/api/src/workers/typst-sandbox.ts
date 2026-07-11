@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import {
   TYPST_BIBLIOGRAPHY_FILE,
@@ -14,6 +15,13 @@ import {
 // Image verified against ghcr.io (official typst/typst package); latest
 // stable tag at time of writing is 0.15.0. Override via TYPST_SANDBOX_IMAGE.
 export const DEFAULT_TYPST_IMAGE = "ghcr.io/typst/typst:0.15.0";
+
+// Immutable bundled fallback for CJK semantic content. This code-owned asset
+// is mounted read-only; compile input cannot select a host path or font.
+export const TYPST_FONT_DIRECTORY = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../assets/fonts",
+);
 
 export const SANDBOX_LIMITS = {
   memory: "512m",
@@ -50,6 +58,8 @@ export function buildTypstDockerArgs(options: {
     SANDBOX_LIMITS.pidsLimit,
     "-v",
     `${options.workDir}:/work`,
+    "-v",
+    `${TYPST_FONT_DIRECTORY}:/fonts:ro`,
     "-w",
     "/work",
     // Explicit entrypoint: never rely on the image default.
@@ -57,6 +67,8 @@ export function buildTypstDockerArgs(options: {
     "typst",
     image,
     "compile",
+    "--font-path",
+    "/fonts",
     SANDBOX_INPUT_FILE,
     SANDBOX_OUTPUT_FILE,
   ];

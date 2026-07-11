@@ -6,8 +6,8 @@ import { DocSchema, type Doc } from "./schema";
 // Web → API → Queue → Worker. Every boundary re-parses these schemas;
 // upstream validation is never trusted.
 
-// Phase 3 TODO #2: only the built-in IEEE template and PDF exist.
-export const CompileTemplateIdSchema = z.literal("ieee");
+// Phase 3 TODO #5: built-in immutable templates share this compile contract.
+export const CompileTemplateIdSchema = z.enum(["ieee", "elsevier"]);
 export type CompileTemplateId = z.infer<typeof CompileTemplateIdSchema>;
 
 export const CompileFormatSchema = z.literal("pdf");

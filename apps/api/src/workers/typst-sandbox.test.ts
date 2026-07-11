@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderIeeeTypstProject } from "@depress/transformers";
 import {
   DEFAULT_TYPST_IMAGE,
+  TYPST_FONT_DIRECTORY,
   SANDBOX_BIBLIOGRAPHY_FILE,
   SANDBOX_INPUT_FILE,
   SANDBOX_OUTPUT_FILE,
@@ -35,11 +36,14 @@ describe("buildTypstDockerArgs", () => {
     expect(args).toContain("--pids-limit");
   });
 
-  it("mounts only the controlled work dir and runs typst compile", () => {
+  it("mounts controlled work and code-owned font directories, then runs typst", () => {
     expect(args[args.indexOf("-v") + 1]).toBe("/tmp/job-1:/work");
+    expect(args[args.lastIndexOf("-v") + 1]).toBe(`${TYPST_FONT_DIRECTORY}:/fonts:ro`);
     expect(args).toContain(DEFAULT_TYPST_IMAGE);
-    expect(args.slice(-3)).toEqual([
+    expect(args.slice(-5)).toEqual([
       "compile",
+      "--font-path",
+      "/fonts",
       SANDBOX_INPUT_FILE,
       SANDBOX_OUTPUT_FILE,
     ]);

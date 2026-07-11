@@ -111,3 +111,16 @@ describe("POST /compile enqueue behavior", () => {
     expect(res.json()).toEqual({ error: "QUEUE_UNAVAILABLE" });
   });
 });
+describe("Elsevier queue contract", () => {
+  it("preserves templateId: elsevier in the validated queue payload", async () => {
+    const queue = createInMemoryCompileQueue();
+    const app = buildApp({ queue });
+    const res = await app.inject({
+      method: "POST",
+      url: "/compile",
+      payload: { ...validBody, templateId: "elsevier" },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(queue.payloads[0]?.templateId).toBe("elsevier");
+  });
+});

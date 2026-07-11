@@ -73,12 +73,22 @@ describe("POST /compile", () => {
     const res = await app.inject({
       method: "POST",
       url: "/compile",
-      payload: { ...validBody, templateId: "elsevier" },
+      payload: { ...validBody, templateId: "acm" },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ error: "VALIDATION_ERROR" });
   });
 
+
+  it("accepts Elsevier through the shared compile route", async () => {
+    const app = buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/compile",
+      payload: { ...validBody, templateId: "elsevier" },
+    });
+    expect(res.statusCode).toBe(202);
+  });
   it("rejects an unknown format", async () => {
     const app = buildApp();
     const res = await app.inject({
