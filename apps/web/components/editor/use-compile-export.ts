@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { CompileTemplateId } from "@depress/ast";
 import type { ExportIssue } from "./export-ast";
 import { runCompileExport, type CompileExportDeps } from "./compile-export";
 import { useReferenceLibrary } from "@/stores/reference-library";
@@ -29,8 +30,9 @@ function triggerDownload(url: string): void {
 
 export function useCompileExport(options: {
   getEditorJson: () => unknown;
+  templateId: CompileTemplateId;
   // 测试注入口;生产用默认值。
-  deps?: Partial<CompileExportDeps>;
+  deps?: Omit<Partial<CompileExportDeps>, "templateId">;
   download?: (url: string) => void;
 }): { state: CompileExportUiState; exportPdf: () => Promise<void> } {
   const [state, setState] = useState<CompileExportUiState>({ phase: "idle" });
@@ -44,7 +46,7 @@ export function useCompileExport(options: {
     };
   }, []);
 
-  const { getEditorJson, deps, download } = options;
+  const { getEditorJson, templateId, deps, download } = options;
   const busyRef = useRef(false);
   const exportPdf = useCallback(async () => {
     // 重入保护:按钮禁用之外的第二道闸(如快速双击)。
@@ -66,6 +68,7 @@ export function useCompileExport(options: {
         apiUrl: process.env["NEXT_PUBLIC_API_URL"] ?? "http://localhost:3001",
         signal,
         ...deps,
+        templateId,
         library,
         ...(metadata !== undefined ? { metadata } : {}),
         onPhase: (phase) => {
@@ -89,7 +92,7 @@ export function useCompileExport(options: {
       }
       setState({ phase: "error", message: result.message });
     }
-  }, [getEditorJson, deps, download]);
+  }, [getEditorJson, templateId, deps, download]);
 
   return { state, exportPdf };
 }

@@ -1,7 +1,18 @@
 "use client";
 
+import { useState } from "react";
+import {
+  CompileTemplateIdSchema,
+  type CompileTemplateId,
+} from "@depress/ast";
 import type { CompileExportDeps } from "./compile-export";
 import { useCompileExport } from "./use-compile-export";
+
+const TEMPLATE_OPTIONS = [
+  { id: "ieee", label: "IEEE" },
+  { id: "elsevier", label: "Elsevier" },
+  { id: "gbt7714", label: "GB/T 7714" },
+] as const satisfies readonly { id: CompileTemplateId; label: string }[];
 
 // 失败码 → 用户可读文案;未知码兜底展示原码,绝不吞掉。
 const ERROR_TEXT: Record<string, string> = {
@@ -21,18 +32,41 @@ export function ExportPdfButton({
 }: {
   getEditorJson: () => unknown;
   // 测试注入口(mock fetch/sleep/download);生产不传。
-  deps?: Partial<CompileExportDeps>;
+  deps?: Omit<Partial<CompileExportDeps>, "templateId">;
   download?: (url: string) => void;
 }) {
+  const [templateId, setTemplateId] = useState<CompileTemplateId>("ieee");
   const { state, exportPdf } = useCompileExport({
     getEditorJson,
+    templateId,
     ...(deps ? { deps } : {}),
     ...(download ? { download } : {}),
   });
   const busy = state.phase === "compiling" || state.phase === "polling";
+  const templateLabel = TEMPLATE_OPTIONS.find((option) => option.id === templateId)?.label;
 
   return (
     <div className="flex flex-col items-end gap-1">
+      <label className="sr-only" htmlFor="export-template">
+        PDF template
+      </label>
+      <select
+        id="export-template"
+        aria-label="PDF template"
+        value={templateId}
+        disabled={busy}
+        onChange={(event) => {
+          const parsed = CompileTemplateIdSchema.safeParse(event.currentTarget.value);
+          if (parsed.success) setTemplateId(parsed.data);
+        }}
+        className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700 disabled:cursor-not-allowed disabled:bg-gray-100"
+      >
+        {TEMPLATE_OPTIONS.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.label}
+          </option>
+        ))}
+      </select>
       <button
         onClick={() => void exportPdf()}
         disabled={busy}
@@ -47,7 +81,7 @@ export function ExportPdfButton({
             {state.phase === "compiling" ? "提交中…" : "编译中…"}
           </span>
         ) : (
-          "Export PDF (IEEE)"
+          `Export PDF (${templateLabel})`
         )}
       </button>
 

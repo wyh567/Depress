@@ -2,6 +2,7 @@ import {
   CompileRequestSchema,
   JobResponseSchema,
   type CslItem,
+  type CompileTemplateId,
   type DocMetadata,
 } from "@depress/ast";
 import { exportValidatedAst, type ExportIssue } from "./export-ast";
@@ -23,6 +24,8 @@ export type CompileExportResult =
 
 export interface CompileExportDeps {
   apiUrl: string;
+  // Template selection is an export presentation parameter, not document content.
+  templateId: CompileTemplateId;
   // Snapshot of the local reference library at export time (read-only).
   // Production wires Zustand; tests inject fixtures. Never mutated here.
   library: readonly CslItem[];
@@ -68,7 +71,7 @@ export async function runCompileExport(
   const request = CompileRequestSchema.safeParse({
     ast: exported.ast,
     references: cited.references,
-    templateId: "ieee",
+    templateId: deps.templateId,
     format: "pdf",
   });
   if (!request.success) {

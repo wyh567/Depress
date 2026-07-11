@@ -1,9 +1,11 @@
 # PROCESS.md — MVP Roadmap & State
 
 ## Status
-- Current Phase: **3**
+- Current Phase: **4**
 - Phase 2: **COMPLETE**
-- Last Updated: 2026-07-11（Phase 3 TODO #6 GB/T 7714 native compilation path 完成；TODO #7 待做）
+- Phase 3: **COMPLETE**
+- Phase 4: **NOT STARTED**
+- Last Updated: 2026-07-11（Phase 3 TODO #7 template switcher + exit smoke 完成；Phase 3 关闭）
 
 ## Phase 1 — Editor Core & AST Contract
 Goal: A working structured editor that emits validated AST JSON. No backend yet.
@@ -174,13 +176,22 @@ Goal: Deployable portfolio product.
   - **Limitation:** key-rule validation is sampled; complete normative GB/T punctuation conformance is not claimed.
 
 ### TODO #7 — Template switcher + Phase 3 exit smoke
+- [x] **COMPLETE (2026-07-11):** Web 模板切换 + Phase 3 exit smoke。`ExportPdfButton` 使用**本地** `templateId` state（默认 `ieee`）；选项 `ieee` / `elsevier` / `gbt7714`；类型来自 `@depress/ast` 的 `CompileTemplateId`；DOM 值经 `CompileTemplateIdSchema.safeParse`，未知值不进入请求；`runCompileExport` 的 `templateId` **必填**；POST 前 `CompileRequestSchema` 最终重校验。模板选择**不进入** AST / metadata / references / Tiptap JSON / Zustand document state。
+  - **Acceptance（仓库原文）:** 不改正文 AST，仅切换模板，得到三份版式不同、引用正确的 PDF。
+  - **非目标 / 非 blocker:** IEEE 完整 authors / affiliations / abstract / keywords 排版属于 TODO #1 已知范围（当时仅要求 `metadata.title`），**不是** TODO #7 验收项，**不是** Phase 3 exit blocker，**不是**回归。
+  - **Phase 3 exit smoke (`DEPRESS_PHASE3_SMOKE=1`):** 同一 AST + 同一 references，仅 `templateId` 改变，顺序 ieee → elsevier → gbt7714。真实链路：Fastify → BullMQ → Redis → Worker → generic renderer → Typst 0.15 Docker sandbox → MinIO → signed URL → PDF。三份均 `%PDF-`；字节 IEEE 24,611 / Elsevier 24,643 / GB/T 26,477；三份 SHA-256 不同（字节/哈希差异 ≠ 视觉验证声明）。AST 与 references 未修改。
+  - **视觉抽检（人工）:**
+    - **IEEE:** title 可见；body 可见；数字 citation `[1] [2] [1] [3]`；编号 References 可见；中文 reference glyph 正常；unused reference 未出现；无 tofu / 裁切 / 重叠 / placeholder。**已知范围：** 完整 IEEE authors、affiliations、abstract、keywords 排版不在 TODO #7 / Phase 3 exit 范围内（TODO #1 仅注入 title）。
+    - **Elsevier:** 单栏 author-date manuscript；authors / affiliations / Abstract / Keywords 可见；author-date citations 可见；References 可见；unused reference 未出现；无 tofu / 裁切 / 重叠 / placeholder。
+    - **GB/T:** A4 单栏；authors / affiliations / 摘要 / 关键词可见；数字 citations 可见；参考文献可见；unused reference 未出现；无 tofu / 裁切 / 重叠 / placeholder。**限制：** 使用 Typst 0.15 内置 `gb-7714-2015-numeric`；已通过项目支持来源类型与关键规则抽样验证；**不宣称**完全符合 GB/T 7714-2015 全部规范或全部标点细节。
+  - **最终验证（TODO #7 合入前）:** `pnpm lint` 5/5 tasks passed；`pnpm typecheck` 5/5 tasks passed；`pnpm test` 33 files passed / 6 skipped，330 tests passed / 8 skipped；真实 Phase 3 exit smoke 1 file passed / 1 test passed。
 - **Goal:** 同一文档一键导出 IEEE / Elsevier / GB/T 三份 PDF；满足 Phase 3 退出标准。
 - **Scope:** web template 选择 UI（最小：下拉/按钮组）；`compile-export` 传所选 `templateId`；按钮文案不再写死 IEEE；exit smoke：同一 fixture 三角导出 + 引用抽检。
 - **Files likely affected:** `apps/web/components/editor/*`；`compile-export.ts`；api 已支持三 id；`process.md` 关闭 Phase 3。
 - **Data contract change:** 无（消费既有 union）。
 - **Test requirements:** UI/hook 单测；契约；可选 `DEPRESS_ROUNDTRIP_SMOKE` 扩展或独立 `DEPRESS_PHASE3_SMOKE`。
 - **Acceptance criteria:** 不改正文 AST，仅切换模板，得到三份版式不同、引用正确的 PDF。
-- **Explicit non-goals:** 模板市场上传；逐页视觉回归平台。
+- **Explicit non-goals:** 模板市场上传；逐页视觉回归平台；IEEE 完整 metadata 封面排版。
 - **Dependencies:** #2–#6 全部完成。
 - **Risks:** 三角导出超时；UI 误引入样式控件（违反 Invariant #1）。
 
@@ -192,7 +203,7 @@ Goal: Deployable portfolio product.
 5. TODO #5 → #6 → #7。
 
 ### Phase 3 Exit Criteria
-同一篇结构化文档（不改正文 AST）导出 IEEE + Elsevier + GB/T 三份 PDF，正文引用与参考文献列表正确。完成前 Phase 保持为 **3**。
+同一篇结构化文档（不改正文 AST）导出 IEEE + Elsevier + GB/T 三份 PDF，正文引用与参考文献列表正确。**已满足（2026-07-11）** — Phase 3 **COMPLETE**；Current Phase 进入 **4**（NOT STARTED，本阶段未实现 Phase 4）。
 
 ## Backlog
 (Out-of-phase ideas go here — do not implement early.)
@@ -201,3 +212,4 @@ Goal: Deployable portfolio product.
 - Pandoc DOCX 路径（Phase 4）
 - Postgres document versioning / Auth（Phase 4）
 - 完整 CSL-JSON 全字段 / citeproc 浏览器预览
+- IEEE 完整 authors / affiliations / abstract / keywords 排版（TODO #1 已知非目标；非 Phase 3 回归）

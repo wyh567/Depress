@@ -37,13 +37,100 @@ function instantDeps(fetchFn: typeof fetch): Partial<CompileExportDeps> {
 }
 
 describe("ExportPdfButton", () => {
+  it("defaults to IEEE and presents the three shared template options", () => {
+    render(<ExportPdfButton getEditorJson={validJson} />);
+    const select = screen.getByRole("combobox", { name: "PDF template" });
+    expect(select).toHaveValue("ieee");
+    expect(screen.getByRole("option", { name: "IEEE" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Elsevier" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "GB/T 7714" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export PDF (IEEE)" })).toBeInTheDocument();
+  });
+
+  it("sends ieee through the default UI export path", async () => {
+    const fetchFn = vi.fn(async (url: string | URL | Request) =>
+      String(url).endsWith("/compile")
+        ? jsonResponse(202, { jobId: JOB_ID, status: "queued" })
+        : jsonResponse(200, {
+            jobId: JOB_ID,
+            status: "succeeded",
+            downloadUrl: "https://s3.test/a.pdf",
+          })
+    ) as unknown as typeof fetch;
+    render(<ExportPdfButton getEditorJson={validJson} deps={instantDeps(fetchFn)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Export PDF (IEEE)" }));
+    await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(2));
+    const [, init] = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      templateId: "ieee",
+      format: "pdf",
+    });
+  });
+
+  it("uses the selected template in the actual POST payload", async () => {
+    const fetchFn = vi.fn(async (url: string | URL | Request) =>
+      String(url).endsWith("/compile")
+        ? jsonResponse(202, { jobId: JOB_ID, status: "queued" })
+        : jsonResponse(200, {
+            jobId: JOB_ID,
+            status: "succeeded",
+            downloadUrl: "https://s3.test/a.pdf",
+          })
+    ) as unknown as typeof fetch;
+    render(<ExportPdfButton getEditorJson={validJson} deps={instantDeps(fetchFn)} />);
+
+    const select = screen.getByRole("combobox", { name: "PDF template" });
+    fireEvent.change(select, { target: { value: "elsevier" } });
+    expect(screen.getByRole("button", { name: "Export PDF (Elsevier)" })).toBeInTheDocument();
+    fireEvent.change(select, { target: { value: "gbt7714" } });
+    expect(screen.getByRole("button", { name: "Export PDF (GB/T 7714)" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Export PDF (GB/T 7714)" }));
+
+    await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(2));
+    const [, init] = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      templateId: "gbt7714",
+      format: "pdf",
+    });
+  });
+
+  it("ignores an unknown select value so it cannot produce an invalid request", async () => {
+    const fetchFn = vi.fn() as unknown as typeof fetch;
+    render(<ExportPdfButton getEditorJson={validJson} deps={instantDeps(fetchFn)} />);
+    const select = screen.getByRole("combobox", { name: "PDF template" });
+
+    fireEvent.change(select, { target: { value: "unknown" } });
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(select).toHaveValue("ieee");
+    expect(screen.getByRole("button", { name: "Export PDF (IEEE)" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Export PDF (IEEE)" }));
+    await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(1));
+    const [, init] = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(JSON.parse(String(init.body))).toMatchObject({ templateId: "ieee" });
+  });
+
   it("成功链路:点击 → 忙态禁用 → 成功提示并触发下载", async () => {
+    let releasePost: (() => void) | undefined;
+    const postGate = new Promise<void>((resolve) => {
+      releasePost = resolve;
+    });
     let releasePoll: (() => void) | undefined;
     const gate = new Promise<void>((resolve) => {
       releasePoll = resolve;
     });
     const fetchFn = vi.fn(async (url: string | URL | Request) => {
       if (String(url).endsWith("/compile")) {
+        await postGate;
         return jsonResponse(202, { jobId: JOB_ID, status: "queued" });
       }
       await gate;
@@ -59,10 +146,18 @@ describe("ExportPdfButton", () => {
       <ExportPdfButton getEditorJson={validJson} deps={instantDeps(fetchFn)} download={download} />
     );
     const button = screen.getByRole("button", { name: "Export PDF (IEEE)" });
+    const select = screen.getByRole("combobox", { name: "PDF template" });
     fireEvent.click(button);
 
-    // 轮询挂起期间:按钮禁用且显示忙态文案。
     await waitFor(() => expect(button).toBeDisabled());
+    expect(select).toBeDisabled();
+    expect(button).toHaveTextContent("提交中…");
+
+    releasePost?.();
+    // 轮询挂起期间:两个控件均禁用且显示忙态文案。
+    await waitFor(() => expect(button).toHaveTextContent("编译中…"));
+    await waitFor(() => expect(button).toBeDisabled());
+    expect(select).toBeDisabled();
     expect(button).toHaveTextContent("编译中…");
 
     releasePoll?.();

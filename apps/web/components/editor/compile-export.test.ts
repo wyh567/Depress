@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CslItem } from "@depress/ast";
+import type { CompileTemplateId, CslItem } from "@depress/ast";
 import { runCompileExport, type CompileExportDeps } from "./compile-export";
 
 const JOB_ID = "6f9619ff-8b86-d011-b42d-00c04fc964ff";
@@ -69,6 +69,7 @@ function deps(
   const clock = fakeClock();
   return {
     apiUrl: "http://api.test",
+    templateId: "ieee",
     library: [smith, unused],
     fetchFn,
     now: clock.now,
@@ -76,6 +77,67 @@ function deps(
     ...extra,
   };
 }
+
+describe("runCompileExport — template contract", () => {
+  function successfulFetch(postBodies: unknown[]): typeof fetch {
+    return vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith("/compile")) {
+        postBodies.push(JSON.parse(String(init?.body)));
+        return jsonResponse(202, { jobId: JOB_ID, status: "queued" });
+      }
+      return jsonResponse(200, {
+        jobId: JOB_ID,
+        status: "succeeded",
+        downloadUrl: "https://s3.test/a.pdf",
+      });
+    }) as unknown as typeof fetch;
+  }
+
+  it("sends each shared template ID without mutating the editor fixture or library", async () => {
+    const editorJson = validEditorJson();
+    const library = [smith, unused];
+    const editorSnapshot = structuredClone(editorJson);
+    const librarySnapshot = structuredClone(library);
+    const postBodies: unknown[] = [];
+    const fetchFn = successfulFetch(postBodies);
+
+    for (const templateId of ["ieee", "elsevier", "gbt7714"] as const) {
+      await runCompileExport(editorJson, deps(fetchFn, { templateId, library }));
+    }
+
+    expect(editorJson).toEqual(editorSnapshot);
+    expect(library).toEqual(librarySnapshot);
+    expect(postBodies).toHaveLength(3);
+    const bodies = postBodies as Array<{
+      ast: unknown;
+      references: unknown;
+      templateId: CompileTemplateId;
+      format: string;
+    }>;
+    expect(bodies.map((body) => body.templateId)).toEqual(["ieee", "elsevier", "gbt7714"]);
+    for (const body of bodies) {
+      expect(body.ast).toEqual(bodies[0]?.ast);
+      expect(body.references).toEqual(bodies[0]?.references);
+      expect(body.format).toBe("pdf");
+      expect({ ...body, templateId: "ieee" }).toEqual({
+        ...bodies[0],
+        templateId: "ieee",
+      });
+    }
+  });
+
+  it("rejects an unknown runtime template ID before POST", async () => {
+    const fetchFn = vi.fn() as unknown as typeof fetch;
+    const result = await runCompileExport(
+      validEditorJson(),
+      deps(fetchFn, {
+        templateId: "unknown" as unknown as CompileTemplateId,
+      }),
+    );
+    expect(result.outcome).toBe("validation_error");
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+});
 
 describe("runCompileExport — 预检(Guardrail #3)", () => {
   it("非法 AST(heading level 4)直接返回 validation_error,绝不发请求", async () => {
@@ -303,6 +365,7 @@ describe("runCompileExport — 硬超时(Guardrail #2)", () => {
 
     const result = await runCompileExport(validEditorJson(), {
       apiUrl: "http://api.test",
+      templateId: "ieee",
       library: [smith],
       fetchFn,
       now: clock.now,
