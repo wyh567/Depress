@@ -127,13 +127,13 @@ export type SpawnProcess = (
 const defaultSpawnProcess: SpawnProcess = (command, args, options) =>
   spawn(command, args, options) as ChildProcess as ManagedChildProcess;
 
-interface OutputCapture {
+export interface OutputCapture {
   capturedBytes: number;
   truncated: boolean;
   streamError: boolean;
 }
 
-interface CommandResult {
+export interface BoundedCommandResult {
   status: "exited" | "timed-out" | "spawn-error";
   code: number | null;
   signal: NodeJS.Signals | null;
@@ -144,10 +144,11 @@ interface CommandResult {
   sigkillAccepted: boolean;
   stdout: OutputCapture;
   stderr: OutputCapture;
+  stdoutText: string;
   stderrText: string;
 }
 
-interface CommandTimings {
+export interface BoundedCommandTimings {
   timeoutMs: number;
   termGraceMs: number;
   killGraceMs: number;
@@ -183,12 +184,14 @@ function captureBounded(
   };
 }
 
-function runBoundedCommand(
+// Narrow B1 process primitive — shared with Worker-start reconciliation so
+// discovery/inspect/cleanup use the same shell-false bounded lifecycle.
+export function runBoundedCommand(
   spawnProcess: SpawnProcess,
   command: string,
   args: readonly string[],
-  timings: CommandTimings
-): Promise<CommandResult> {
+  timings: BoundedCommandTimings
+): Promise<BoundedCommandResult> {
   return new Promise((resolve) => {
     let child: ManagedChildProcess;
     try {
@@ -209,6 +212,7 @@ function runBoundedCommand(
         sigkillAccepted: false,
         stdout: { capturedBytes: 0, truncated: false, streamError: false },
         stderr: { capturedBytes: 0, truncated: false, streamError: false },
+        stdoutText: "",
         stderrText: "",
       });
       return;
@@ -229,7 +233,7 @@ function runBoundedCommand(
     let pendingClose: { code: number | null; signal: NodeJS.Signals | null } | undefined;
 
     const finish = (
-      status: CommandResult["status"],
+      status: BoundedCommandResult["status"],
       code: number | null,
       signal: NodeJS.Signals | null,
       closeConfirmed: boolean
@@ -250,6 +254,7 @@ function runBoundedCommand(
         sigkillAccepted,
         stdout: stdout.result(),
         stderr: stderr.result(),
+        stdoutText: stdout.text(),
         stderrText: stderr.text(),
       });
     };
@@ -345,14 +350,16 @@ async function readValidatedContainerId(
   return null;
 }
 
-function isAlreadyRemoved(stderr: string): boolean {
+// Residual P3: Docker CLI "not found" detection is locale-sensitive via
+// English stderr text when no structural exit code is available.
+export function isDockerContainerAlreadyRemoved(stderr: string): boolean {
   return stderr.toLowerCase().includes("no such container");
 }
 
 async function cleanupExactContainer(
   spawnProcess: SpawnProcess,
   containerId: string,
-  timings: CommandTimings
+  timings: BoundedCommandTimings
 ): Promise<{ status: "succeeded" | "failed"; cliClosed: boolean }> {
   const result = await runBoundedCommand(
     spawnProcess,
@@ -363,7 +370,7 @@ async function cleanupExactContainer(
   if (result.status === "exited" && result.code === 0) {
     return { status: "succeeded", cliClosed: result.closeConfirmed };
   }
-  if (result.status === "exited" && isAlreadyRemoved(result.stderrText)) {
+  if (result.status === "exited" && isDockerContainerAlreadyRemoved(result.stderrText)) {
     return { status: "succeeded", cliClosed: result.closeConfirmed };
   }
   return { status: "failed", cliClosed: result.closeConfirmed };
