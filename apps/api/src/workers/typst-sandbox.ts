@@ -55,12 +55,55 @@ export function isDockerContainerId(value: string): boolean {
   return DOCKER_CONTAINER_ID.test(value);
 }
 
+type SandboxRuntimeIdentity = {
+  uid: number;
+  gid: number;
+};
+
+type ResolveSandboxRuntimeIdentity = () => SandboxRuntimeIdentity | undefined;
+
+const INVALID_RUNTIME_IDENTITY_MESSAGE = "Sandbox runtime identity resolution failed";
+
+function validateSandboxRuntimeIdentity(
+  identity: SandboxRuntimeIdentity
+): SandboxRuntimeIdentity {
+  if (
+    !Number.isSafeInteger(identity.uid) ||
+    identity.uid <= 0 ||
+    !Number.isSafeInteger(identity.gid) ||
+    identity.gid <= 0
+  ) {
+    throw new Error(INVALID_RUNTIME_IDENTITY_MESSAGE);
+  }
+  return identity;
+}
+
+function resolveProcessSandboxRuntimeIdentity(): SandboxRuntimeIdentity | undefined {
+  if (process.platform === "win32") return undefined;
+  if (typeof process.getuid !== "function" || typeof process.getgid !== "function") {
+    throw new Error(INVALID_RUNTIME_IDENTITY_MESSAGE);
+  }
+  return validateSandboxRuntimeIdentity({ uid: process.getuid(), gid: process.getgid() });
+}
+
+function resolveSandboxRuntimeIdentity(
+  resolver: ResolveSandboxRuntimeIdentity
+): SandboxRuntimeIdentity | undefined {
+  try {
+    const identity = resolver();
+    return identity === undefined ? undefined : validateSandboxRuntimeIdentity(identity);
+  } catch {
+    throw new Error(INVALID_RUNTIME_IDENTITY_MESSAGE);
+  }
+}
+
 // Pure argument builder. runId and cidFile are generated inside the sandbox
 // runner and are never accepted from compile/HTTP input.
 export function buildTypstDockerArgs(options: {
   workDir: string;
   runId: string;
   cidFile: string;
+  runtimeIdentity?: SandboxRuntimeIdentity;
 }): string[] {
   return [
     "run",
@@ -86,6 +129,9 @@ export function buildTypstDockerArgs(options: {
     SANDBOX_LIMITS.cpus,
     "--pids-limit",
     SANDBOX_LIMITS.pidsLimit,
+    ...(options.runtimeIdentity
+      ? ["--user", `${options.runtimeIdentity.uid}:${options.runtimeIdentity.gid}`]
+      : []),
     "-v",
     `${options.workDir}:/work`,
     "-v",
@@ -396,11 +442,14 @@ export function createTypstSandboxRunner(
   options: {
     spawnProcess?: SpawnProcess;
     createRunId?: () => string;
+    resolveRuntimeIdentity?: ResolveSandboxRuntimeIdentity;
     timings?: Partial<SandboxTimings>;
   } = {}
 ): TypstSandboxRunner {
   const spawnProcess = options.spawnProcess ?? defaultSpawnProcess;
   const createRunId = options.createRunId ?? randomUUID;
+  const resolveRuntimeIdentity =
+    options.resolveRuntimeIdentity ?? resolveProcessSandboxRuntimeIdentity;
   const timings: SandboxTimings = {
     executionTimeoutMs: SANDBOX_LIMITS.timeoutMs,
     termGraceMs: SANDBOX_LIMITS.termGraceMs,
@@ -416,6 +465,7 @@ export function createTypstSandboxRunner(
 
   return {
     async compile(project) {
+      const runtimeIdentity = resolveSandboxRuntimeIdentity(resolveRuntimeIdentity);
       const runId = createRunId();
       const runDir = await mkdtemp(join(tmpdir(), "depress-typst-"));
       const workDir = join(runDir, "work");
@@ -430,7 +480,12 @@ export function createTypstSandboxRunner(
         const result = await runBoundedCommand(
           spawnProcess,
           "docker",
-          buildTypstDockerArgs({ workDir, runId, cidFile }),
+          buildTypstDockerArgs({
+            workDir,
+            runId,
+            cidFile,
+            ...(runtimeIdentity === undefined ? {} : { runtimeIdentity }),
+          }),
           {
             timeoutMs: timings.executionTimeoutMs,
             termGraceMs: timings.termGraceMs,

@@ -17,7 +17,7 @@ import {
   TYPST_FONT_DIRECTORY,
   SandboxCompileError,
   buildTypstDockerArgs,
-  createTypstSandboxRunner,
+  createTypstSandboxRunner as createProductionTypstSandboxRunner,
   isDockerContainerId,
   type ManagedChildProcess,
   type SpawnProcess,
@@ -25,6 +25,16 @@ import {
 
 const CID = "a".repeat(64);
 const RUN_ID = "00000000-0000-4000-8000-000000000001";
+const TEST_RUNTIME_IDENTITY = { uid: 124, gid: 125 } as const;
+
+type SandboxRunnerOptions = NonNullable<Parameters<typeof createProductionTypstSandboxRunner>[0]>;
+
+function createTypstSandboxRunner(options: SandboxRunnerOptions = {}) {
+  return createProductionTypstSandboxRunner({
+    resolveRuntimeIdentity: () => TEST_RUNTIME_IDENTITY,
+    ...options,
+  });
+}
 
 function argValue(args: readonly string[], name: string): string {
   return args[args.indexOf(name) + 1] ?? "";
@@ -105,6 +115,7 @@ describe("buildTypstDockerArgs", () => {
     workDir: "/tmp/job-1",
     runId: RUN_ID,
     cidFile: "/tmp/job-1/container.cid",
+    runtimeIdentity: TEST_RUNTIME_IDENTITY,
   });
 
   it("preserves all sandbox hardening and resource limits", () => {
@@ -143,9 +154,57 @@ describe("buildTypstDockerArgs", () => {
       SANDBOX_OUTPUT_FILE,
     ]);
   });
+
+  it("maps the Worker identity before mounts and the immutable image", () => {
+    expect(argValue(args, "--user")).toBe("124:125");
+    expect(args.indexOf("--user")).toBeLessThan(args.indexOf("-v"));
+    expect(args.indexOf("--user")).toBeLessThan(args.indexOf(DEFAULT_TYPST_IMAGE));
+  });
+
+  it("omits the user mapping for Windows-compatible no-identity behavior", () => {
+    const windowsArgs = buildTypstDockerArgs({
+      workDir: "/tmp/job-1",
+      runId: RUN_ID,
+      cidFile: "/tmp/job-1/container.cid",
+    });
+    expect(windowsArgs).not.toContain("--user");
+  });
 });
 
 describe("Docker container identity", () => {
+  it.each([
+    ["UID 0", { uid: 0, gid: 125 }],
+    ["GID 0", { uid: 124, gid: 0 }],
+    ["negative UID", { uid: -1, gid: 125 }],
+    ["negative GID", { uid: 124, gid: -1 }],
+    ["fractional UID", { uid: 124.5, gid: 125 }],
+    ["NaN GID", { uid: 124, gid: Number.NaN }],
+    ["unsafe UID", { uid: Number.MAX_SAFE_INTEGER + 1, gid: 125 }],
+    ["non-numeric GID", { uid: 124, gid: "125" as unknown as number }],
+  ])("rejects an invalid runtime identity before run setup: %s", async (_name, identity) => {
+    const before = new Set(
+      (await readdir(tmpdir())).filter((name) => name.startsWith("depress-typst-"))
+    );
+    let runIdCalls = 0;
+    const { spawnProcess, calls } = spawnHarness(() => undefined);
+    await expect(
+      createTypstSandboxRunner({
+        spawnProcess,
+        resolveRuntimeIdentity: () => identity,
+        createRunId: () => {
+          runIdCalls += 1;
+          return RUN_ID;
+        },
+      }).compile({ main: "identity must not affect this content" })
+    ).rejects.toThrow("Sandbox runtime identity resolution failed");
+    const after = new Set(
+      (await readdir(tmpdir())).filter((name) => name.startsWith("depress-typst-"))
+    );
+    expect(runIdCalls).toBe(0);
+    expect(calls).toHaveLength(0);
+    expect(after).toEqual(before);
+  });
+
   it("accepts only a full lowercase 64-hex Docker container ID", () => {
     expect(isDockerContainerId(CID)).toBe(true);
     expect(isDockerContainerId("A".repeat(64))).toBe(false);
@@ -178,6 +237,33 @@ describe("Docker container identity", () => {
     });
     await createTypstSandboxRunner({ spawnProcess }).compile({ main: secretText });
     expect(labels.join(" ")).not.toContain(secretText);
+  });
+
+  it("does not let document content influence the Docker user mapping", async () => {
+    const documentIdentity = "999:999";
+    let dockerIdentity = "";
+    const { spawnProcess } = spawnHarness(async ({ args, child }) => {
+      dockerIdentity = argValue(args, "--user");
+      await writeDockerOutputs(args);
+      child.close(0);
+    });
+    await createTypstSandboxRunner({ spawnProcess }).compile({ main: documentIdentity });
+    expect(dockerIdentity).toBe("124:125");
+    expect(dockerIdentity).not.toBe(documentIdentity);
+  });
+
+  it("omits --user when the internal resolver reports Windows-compatible no identity", async () => {
+    let argsSeen: readonly string[] = [];
+    const { spawnProcess } = spawnHarness(async ({ args, child }) => {
+      argsSeen = args;
+      await writeDockerOutputs(args);
+      child.close(0);
+    });
+    await createTypstSandboxRunner({
+      spawnProcess,
+      resolveRuntimeIdentity: () => undefined,
+    }).compile({ main: "x" });
+    expect(argsSeen).not.toContain("--user");
   });
 
   it("keeps the host CID file inside the unique run directory but outside the writable mount", async () => {
@@ -553,7 +639,7 @@ describe("createTypstSandboxRunner lifecycle", () => {
 // Requires the already-approved pinned image. Default tests never run Docker.
 describe.skipIf(process.env["DEPRESS_DOCKER_SMOKE"] !== "1")("typst sandbox (docker smoke)", () => {
   it("compiles a trivial document to a real PDF", async () => {
-    const sandbox = createTypstSandboxRunner();
+    const sandbox = createProductionTypstSandboxRunner();
     const pdf = await sandbox.compile({ main: "Hello from DePress." });
     expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
   }, 120_000);
@@ -608,7 +694,7 @@ describe.skipIf(process.env["DEPRESS_DOCKER_SMOKE"] !== "1")("typst sandbox (doc
           : {}),
       })),
     });
-    const pdf = await createTypstSandboxRunner().compile(project);
+    const pdf = await createProductionTypstSandboxRunner().compile(project);
     expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
   }, 120_000);
 });
