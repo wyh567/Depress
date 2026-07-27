@@ -27,8 +27,30 @@ interface DocumentMetadataState extends DocumentMetadataDraft {
     value: DocumentMetadataDraft[K],
   ) => void;
   clear: () => void;
+  hydrate: (metadata: DocMetadata | undefined) => void;
   // Builds the AST metadata candidate, or undefined when the form is empty.
   toMetadataCandidate: () => DocMetadata | undefined;
+}
+
+export function metadataToDraft(
+  metadata: DocMetadata | undefined,
+): DocumentMetadataDraft {
+  if (!metadata) return { ...EMPTY };
+  return {
+    title: metadata.title ?? "",
+    abstract: metadata.abstract ?? "",
+    keywordsText: (metadata.keywords ?? []).join(", "),
+    authorsText: (metadata.authors ?? [])
+      .map((author) =>
+        author.affiliationIds?.length
+          ? `${author.name} | ${author.affiliationIds.join(",")}`
+          : author.name,
+      )
+      .join("\n"),
+    affiliationsText: (metadata.affiliations ?? [])
+      .map((affiliation) => `${affiliation.id} | ${affiliation.name}`)
+      .join("\n"),
+  };
 }
 
 function parseAffiliations(text: string): { id: string; name: string }[] {
@@ -105,5 +127,6 @@ export const useDocumentMetadata = create<DocumentMetadataState>()((set, get) =>
   ...EMPTY,
   setField: (key, value) => set({ [key]: value }),
   clear: () => set({ ...EMPTY }),
+  hydrate: (metadata) => set(metadataToDraft(metadata)),
   toMetadataCandidate: () => buildMetadataCandidate(get()),
 }));
