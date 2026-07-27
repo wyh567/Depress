@@ -182,10 +182,8 @@ describe("Docker container identity", () => {
     ["unsafe UID", { uid: Number.MAX_SAFE_INTEGER + 1, gid: 125 }],
     ["non-numeric GID", { uid: 124, gid: "125" as unknown as number }],
   ])("rejects an invalid runtime identity before run setup: %s", async (_name, identity) => {
-    const before = new Set(
-      (await readdir(tmpdir())).filter((name) => name.startsWith("depress-typst-"))
-    );
     let runIdCalls = 0;
+    let runDirectoryCalls = 0;
     const { spawnProcess, calls } = spawnHarness(() => undefined);
     await expect(
       createTypstSandboxRunner({
@@ -195,14 +193,15 @@ describe("Docker container identity", () => {
           runIdCalls += 1;
           return RUN_ID;
         },
+        createRunDirectory: async () => {
+          runDirectoryCalls += 1;
+          return join(tmpdir(), "must-not-be-created");
+        },
       }).compile({ main: "identity must not affect this content" })
     ).rejects.toThrow("Sandbox runtime identity resolution failed");
-    const after = new Set(
-      (await readdir(tmpdir())).filter((name) => name.startsWith("depress-typst-"))
-    );
     expect(runIdCalls).toBe(0);
+    expect(runDirectoryCalls).toBe(0);
     expect(calls).toHaveLength(0);
-    expect(after).toEqual(before);
   });
 
   it("accepts only a full lowercase 64-hex Docker container ID", () => {

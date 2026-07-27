@@ -442,12 +442,15 @@ export function createTypstSandboxRunner(
   options: {
     spawnProcess?: SpawnProcess;
     createRunId?: () => string;
+    createRunDirectory?: () => Promise<string>;
     resolveRuntimeIdentity?: ResolveSandboxRuntimeIdentity;
     timings?: Partial<SandboxTimings>;
   } = {}
 ): TypstSandboxRunner {
   const spawnProcess = options.spawnProcess ?? defaultSpawnProcess;
   const createRunId = options.createRunId ?? randomUUID;
+  const createRunDirectory =
+    options.createRunDirectory ?? (() => mkdtemp(join(tmpdir(), "depress-typst-")));
   const resolveRuntimeIdentity =
     options.resolveRuntimeIdentity ?? resolveProcessSandboxRuntimeIdentity;
   const timings: SandboxTimings = {
@@ -467,7 +470,7 @@ export function createTypstSandboxRunner(
     async compile(project) {
       const runtimeIdentity = resolveSandboxRuntimeIdentity(resolveRuntimeIdentity);
       const runId = createRunId();
-      const runDir = await mkdtemp(join(tmpdir(), "depress-typst-"));
+      const runDir = await createRunDirectory();
       const workDir = join(runDir, "work");
       const cidFile = join(runDir, SANDBOX_CID_FILE);
       try {
