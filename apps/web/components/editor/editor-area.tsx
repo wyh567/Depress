@@ -4,9 +4,9 @@ import type { Editor } from "@tiptap/core";
 import { EditorContent } from "@tiptap/react";
 import { useCallback } from "react";
 import { CitationPrompt } from "./citation-prompt";
+import { CompileControls } from "./compile-controls";
 import { DocumentMetadataPanel } from "./document-metadata-panel";
 import { ExportAstButton } from "./export-ast-button";
-import { ExportPdfButton } from "./export-pdf-button";
 
 export type DocumentSaveState =
   | "idle"
@@ -65,7 +65,11 @@ export function EditorArea({
             {saveState === "saving" ? "Saving…" : "Save"}
           </button>
           <ExportAstButton getEditorJson={() => editor?.getJSON()} />
-          <ExportPdfButton getEditorJson={() => editor?.getJSON()} />
+          <CompileControls
+            {...(activeDocumentId === undefined ? {} : { activeDocumentId })}
+            {...(activeRevision === undefined ? {} : { activeRevision })}
+            saveState={saveState}
+          />
         </div>
       </div>
       {!activeDocumentId ? (

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
+import { COMPILE_POLLING_INVALIDATE_EVENT } from "@/components/editor/compile-controls";
 import { authClient } from "@/lib/auth-client";
 import { useReferenceLibrary } from "@/stores/reference-library";
 
@@ -31,6 +32,7 @@ export function AuthenticatedAppGate({ children }: { children: ReactNode }) {
 
   async function signOut() {
     setSigningOut(true);
+    window.dispatchEvent(new Event(COMPILE_POLLING_INVALIDATE_EVENT));
     useReferenceLibrary.getState().clear();
     await authClient.signOut();
     router.replace("/login");
