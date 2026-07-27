@@ -17,6 +17,7 @@ import { registerAuthRoutes } from "./auth/fastify-auth";
 import type { Pool } from "pg";
 import { registerDocumentRoutes } from "./routes/documents";
 import { registerReferenceRoutes } from "./routes/references";
+import { registerCompileJobRoutes } from "./routes/compile-jobs";
 
 // buildApp never listens on a port — callers (tests via app.inject, a future
 // server entrypoint via app.listen) decide that. Each app gets its own job
@@ -66,6 +67,7 @@ export function buildApp(
     if (options.database) {
       registerDocumentRoutes(app, options.auth, options.database);
       registerReferenceRoutes(app, options.auth, options.database);
+      registerCompileJobRoutes(app, options.auth, options.database);
     }
   }
   return app;

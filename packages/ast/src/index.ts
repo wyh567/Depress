@@ -5,5 +5,6 @@ export * from "./compile";
 export * from "./normalize-doi";
 export * from "./doi-lookup";
 export * from "./persisted-document";
+export * from "./persisted-pm-to-ast";
 export * from "./document-api";
 export * from "./reference-api";
