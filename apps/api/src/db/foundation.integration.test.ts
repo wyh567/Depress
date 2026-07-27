@@ -43,13 +43,27 @@ const secondEnvelope = {
 describeDatabase("mentor MVP foundation repositories", () => {
   let pool: Pool;
 
+  async function createUser(id: string): Promise<void> {
+    await pool.query(
+      `
+        INSERT INTO "user" (
+          "id", "name", "email", "emailVerified", "createdAt", "updatedAt"
+        )
+        VALUES ($1, $2, $3, true, now(), now())
+      `,
+      [id, `Test ${id}`, `${id}@example.test`],
+    );
+  }
+
   beforeAll(async () => {
     pool = new Pool({ connectionString: databaseUrl });
     await runMigrations(pool);
   });
 
   beforeEach(async () => {
-    await pool.query("TRUNCATE project_references, documents, projects RESTART IDENTITY CASCADE");
+    await pool.query(
+      `TRUNCATE "verification", "account", "session", "user", project_references, documents, projects RESTART IDENTITY CASCADE`,
+    );
   });
 
   afterAll(async () => {
@@ -57,6 +71,7 @@ describeDatabase("mentor MVP foundation repositories", () => {
   });
 
   it("enforces one concurrent-safe default project per user", async () => {
+    await createUser("mentor-user");
     const projects = createProjectRepository(pool);
     const results = await Promise.all(
       Array.from({ length: 6 }, () => projects.getOrCreateDefaultProject("mentor-user"))
@@ -75,7 +90,17 @@ describeDatabase("mentor MVP foundation repositories", () => {
     expect(count.rows[0]?.count).toBe("1");
   });
 
+  it("rejects a project for an owner that does not exist", async () => {
+    await expect(
+      createProjectRepository(pool).getOrCreateDefaultProject("missing-owner"),
+    ).rejects.toMatchObject({
+      code: "23503",
+      constraint: "projects_owner_user_id_fk",
+    });
+  });
+
   it("stores an envelope hash and rejects a stale expectedRevision", async () => {
+    await createUser("mentor-user");
     const projects = createProjectRepository(pool);
     const documents = createDocumentRepository(pool);
     const project = await projects.getOrCreateDefaultProject("mentor-user");
@@ -119,6 +144,8 @@ describeDatabase("mentor MVP foundation repositories", () => {
   });
 
   it("scopes reference identity and mutations to a project", async () => {
+    await createUser("mentor-a");
+    await createUser("mentor-b");
     const projects = createProjectRepository(pool);
     const references = createReferenceRepository(pool);
     const firstProject = await projects.getOrCreateDefaultProject("mentor-a");
@@ -158,5 +185,66 @@ describeDatabase("mentor MVP foundation repositories", () => {
     expect(await references.remove(firstProject.id, "smith2024")).toBe(true);
     expect(await references.list(firstProject.id)).toEqual([]);
     expect(await references.list(secondProject.id)).toHaveLength(1);
+  });
+
+  it("cascades a deleted user through auth and all owned project data", async () => {
+    await createUser("cascade-owner");
+    const project = await createProjectRepository(pool).getOrCreateDefaultProject(
+      "cascade-owner",
+    );
+    await createDocumentRepository(pool).create({
+      projectId: project.id,
+      envelope: firstEnvelope,
+    });
+    await createReferenceRepository(pool).create({
+      projectId: project.id,
+      item: {
+        id: "cascade2026",
+        type: "book",
+        title: "Cascade reference",
+      },
+    });
+    await pool.query(
+      `
+        INSERT INTO "session" (
+          "id", "expiresAt", "token", "createdAt", "updatedAt", "userId"
+        )
+        VALUES ('cascade-session', now() + interval '1 hour', 'cascade-token', now(), now(), $1)
+      `,
+      ["cascade-owner"],
+    );
+    await pool.query(
+      `
+        INSERT INTO "account" (
+          "id", "accountId", "providerId", "userId", "createdAt", "updatedAt"
+        )
+        VALUES ('cascade-account', 'cascade-owner', 'credential', $1, now(), now())
+      `,
+      ["cascade-owner"],
+    );
+
+    await pool.query(`DELETE FROM "user" WHERE "id" = $1`, ["cascade-owner"]);
+
+    const counts = await pool.query<{
+      projects: string;
+      documents: string;
+      references: string;
+      sessions: string;
+      accounts: string;
+    }>(`
+      SELECT
+        (SELECT count(*) FROM projects) AS projects,
+        (SELECT count(*) FROM documents) AS documents,
+        (SELECT count(*) FROM project_references) AS references,
+        (SELECT count(*) FROM "session") AS sessions,
+        (SELECT count(*) FROM "account") AS accounts
+    `);
+    expect(counts.rows[0]).toEqual({
+      projects: "0",
+      documents: "0",
+      references: "0",
+      sessions: "0",
+      accounts: "0",
+    });
   });
 });

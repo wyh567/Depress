@@ -45,6 +45,7 @@ describeDatabase("invite-only mentor authentication", () => {
   let pool: Pool;
   let migrationApply: string[] = [];
   let migrationRerun: string[] = [];
+  let orphanMigrationError: unknown;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: databaseUrl });
@@ -55,6 +56,20 @@ describeDatabase("invite-only mentor authentication", () => {
         join(foundationOnly, "0001_mentor_mvp_foundation.sql"),
       );
       await runMigrations(pool, foundationOnly);
+      await pool.query(
+        `
+          INSERT INTO projects (id, owner_user_id, name, is_default)
+          VALUES ('00000000-0000-4000-8000-000000000003', 'orphan-owner', 'Orphan', true)
+        `,
+      );
+      try {
+        await runMigrations(pool, migrationsDirectory);
+      } catch (error) {
+        orphanMigrationError = error;
+      }
+      await pool.query(
+        `DELETE FROM projects WHERE id = '00000000-0000-4000-8000-000000000003'`,
+      );
       migrationApply = (await runMigrations(pool, migrationsDirectory)).applied;
       migrationRerun = (await runMigrations(pool, migrationsDirectory)).applied;
     } finally {
@@ -106,8 +121,15 @@ describeDatabase("invite-only mentor authentication", () => {
     });
   }
 
-  it("applies only the generated auth migration and reruns idempotently", () => {
-    expect(migrationApply).toEqual(["0002_better_auth.sql"]);
+  it("refuses orphan projects, then applies pending migrations and reruns idempotently", () => {
+    expect(orphanMigrationError).toMatchObject({
+      code: "23503",
+      message: "Cannot add projects_owner_user_id_fk: orphan projects exist",
+    });
+    expect(migrationApply).toEqual([
+      "0002_better_auth.sql",
+      "0003_project_owner_fk.sql",
+    ]);
     expect(migrationRerun).toEqual([]);
   });
 

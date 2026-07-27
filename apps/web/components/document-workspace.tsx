@@ -62,6 +62,7 @@ export function DocumentWorkspace({
   const hydrating = useRef(false);
   const editVersion = useRef(0);
   const activeDocumentIdRef = useRef<string | undefined>(undefined);
+  const documentRequestGeneration = useRef(0);
 
   const editor = useDepressEditor({
     onRequestCitation: useCallback(() => setPromptOpen(true), []),
@@ -143,6 +144,35 @@ export function DocumentWorkspace({
     [editor],
   );
 
+  const runDocumentRequest = useCallback(
+    async (request: () => Promise<DocumentResource>) => {
+      const generation = ++documentRequestGeneration.current;
+      setLoading(true);
+      try {
+        const document = await request();
+        if (generation === documentRequestGeneration.current) {
+          hydrate(document);
+        }
+      } catch {
+        if (generation === documentRequestGeneration.current) {
+          setSaveState("failed");
+        }
+      } finally {
+        if (generation === documentRequestGeneration.current) {
+          setLoading(false);
+        }
+      }
+    },
+    [hydrate],
+  );
+
+  useEffect(
+    () => () => {
+      documentRequestGeneration.current += 1;
+    },
+    [],
+  );
+
   const mayReplaceLocalState = useCallback(() => {
     if (saveState === "saving") return false;
     if (!hasUnsavedChanges(saveState)) return true;
@@ -151,31 +181,15 @@ export function DocumentWorkspace({
 
   const createNew = useCallback(async () => {
     if (!mayReplaceLocalState()) return;
-    setLoading(true);
-    try {
-      const created = await client.createDocument();
-      hydrate(created);
-    } catch {
-      setSaveState("failed");
-    } finally {
-      setLoading(false);
-    }
-  }, [client, hydrate, mayReplaceLocalState]);
+    await runDocumentRequest(() => client.createDocument());
+  }, [client, mayReplaceLocalState, runDocumentRequest]);
 
   const openDocument = useCallback(
     async (documentId: string) => {
       if (documentId === activeDocumentId || !mayReplaceLocalState()) return;
-      setLoading(true);
-      try {
-        const document = await client.getDocument(documentId);
-        hydrate(document);
-      } catch {
-        setSaveState("failed");
-      } finally {
-        setLoading(false);
-      }
+      await runDocumentRequest(() => client.getDocument(documentId));
     },
-    [activeDocumentId, client, hydrate, mayReplaceLocalState],
+    [activeDocumentId, client, mayReplaceLocalState, runDocumentRequest],
   );
 
   const save = useCallback(async () => {
@@ -217,16 +231,8 @@ export function DocumentWorkspace({
 
   const reloadServer = useCallback(async () => {
     if (!activeDocumentId) return;
-    setLoading(true);
-    try {
-      const document = await client.getDocument(activeDocumentId);
-      hydrate(document);
-    } catch {
-      setSaveState("failed");
-    } finally {
-      setLoading(false);
-    }
-  }, [activeDocumentId, client, hydrate]);
+    await runDocumentRequest(() => client.getDocument(activeDocumentId));
+  }, [activeDocumentId, client, runDocumentRequest]);
 
   const keepEditing = useCallback(() => {
     setSaveState(lastSafeServerEnvelope ? "dirty" : "failed");

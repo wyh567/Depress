@@ -175,6 +175,16 @@ function clientWith(
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("manual document save and reopen workspace", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -294,5 +304,195 @@ describe("manual document save and reopen workspace", () => {
     expect(client.getDocument).toHaveBeenCalledTimes(1);
     expect(client.getDocument).toHaveBeenCalledWith(ID_A);
     expect(editorHarness.json()).toEqual(supportedEnvelope.editor);
+  });
+
+  it("keeps B active when open A resolves after the later open B request", async () => {
+    const requestA = deferred<DocumentResource>();
+    const requestB = deferred<DocumentResource>();
+    const envelopeB: PersistedDocumentEnvelope = {
+      ...supportedEnvelope,
+      metadata: { title: "Second document" },
+    };
+    const client = clientWith({
+      listDocuments: vi.fn().mockResolvedValue([
+        { id: ID_A, title: "First", revision: 1, updatedAt: CREATED_AT },
+        { id: ID_B, title: "Second", revision: 2, updatedAt: CREATED_AT },
+      ]),
+      getDocument: vi.fn((id: string) =>
+        id === ID_A ? requestA.promise : requestB.promise,
+      ),
+    });
+    render(<DocumentWorkspace client={client} />);
+    const first = await screen.findByRole("button", { name: /^First/ });
+    const second = screen.getByRole("button", { name: /^Second/ });
+
+    act(() => {
+      first.click();
+      second.click();
+    });
+    expect(client.getDocument).toHaveBeenNthCalledWith(1, ID_A);
+    expect(client.getDocument).toHaveBeenNthCalledWith(2, ID_B);
+
+    await act(async () => {
+      requestB.resolve(resource(ID_B, 2, envelopeB));
+      await requestB.promise;
+    });
+    expect(screen.getByText("revision:2")).toBeInTheDocument();
+    expect(editorHarness.editor.commands.setContent).toHaveBeenLastCalledWith(
+      envelopeB.editor,
+      { emitUpdate: false, errorOnInvalidContent: true },
+    );
+    expect(screen.getByText("state:saved")).toBeInTheDocument();
+
+    await act(async () => {
+      requestA.resolve(resource(ID_A, 1));
+      await requestA.promise;
+    });
+    expect(screen.getByText("revision:2")).toBeInTheDocument();
+    expect(editorHarness.editor.commands.setContent).toHaveBeenLastCalledWith(
+      envelopeB.editor,
+      { emitUpdate: false, errorOnInvalidContent: true },
+    );
+  });
+
+  it("does not let stale A completion clear loading for pending B", async () => {
+    const requestA = deferred<DocumentResource>();
+    const requestB = deferred<DocumentResource>();
+    const client = clientWith({
+      listDocuments: vi.fn().mockResolvedValue([
+        { id: ID_A, title: "First", revision: 1, updatedAt: CREATED_AT },
+        { id: ID_B, title: "Second", revision: 2, updatedAt: CREATED_AT },
+      ]),
+      getDocument: vi.fn((id: string) =>
+        id === ID_A ? requestA.promise : requestB.promise,
+      ),
+    });
+    render(<DocumentWorkspace client={client} />);
+    const first = await screen.findByRole("button", { name: /^First/ });
+    const second = screen.getByRole("button", { name: /^Second/ });
+    act(() => {
+      first.click();
+      second.click();
+    });
+
+    await act(async () => {
+      requestA.resolve(resource(ID_A, 1));
+      await requestA.promise;
+    });
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(editorHarness.editor.commands.setContent).not.toHaveBeenCalled();
+
+    await act(async () => {
+      requestB.resolve(resource(ID_B, 2, supportedEnvelope));
+      await requestB.promise;
+    });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByText("revision:2")).toBeInTheDocument();
+  });
+
+  it("ignores a stale A failure after B becomes the active document", async () => {
+    const requestA = deferred<DocumentResource>();
+    const requestB = deferred<DocumentResource>();
+    const client = clientWith({
+      listDocuments: vi.fn().mockResolvedValue([
+        { id: ID_A, title: "First", revision: 1, updatedAt: CREATED_AT },
+        { id: ID_B, title: "Second", revision: 2, updatedAt: CREATED_AT },
+      ]),
+      getDocument: vi.fn((id: string) =>
+        id === ID_A ? requestA.promise : requestB.promise,
+      ),
+    });
+    render(<DocumentWorkspace client={client} />);
+    const first = await screen.findByRole("button", { name: /^First/ });
+    const second = screen.getByRole("button", { name: /^Second/ });
+    act(() => {
+      first.click();
+      second.click();
+    });
+
+    await act(async () => {
+      requestB.resolve(resource(ID_B, 2, supportedEnvelope));
+      await requestB.promise;
+    });
+    await act(async () => {
+      requestA.reject(new Error("stale failure"));
+      await expect(requestA.promise).rejects.toThrow("stale failure");
+    });
+
+    expect(screen.getByText("revision:2")).toBeInTheDocument();
+    expect(screen.getByText("state:saved")).toBeInTheDocument();
+    expect(screen.queryByText("state:failed")).not.toBeInTheDocument();
+  });
+
+  it("ignores a late document response after unmount", async () => {
+    const request = deferred<DocumentResource>();
+    const client = clientWith({
+      listDocuments: vi.fn().mockResolvedValue([
+        { id: ID_A, title: "First", revision: 1, updatedAt: CREATED_AT },
+      ]),
+      getDocument: vi.fn(() => request.promise),
+    });
+    const workspace = render(<DocumentWorkspace client={client} />);
+    fireEvent.click(await screen.findByRole("button", { name: /^First/ }));
+    workspace.unmount();
+
+    await act(async () => {
+      request.resolve(resource(ID_A, 1, supportedEnvelope));
+      await request.promise;
+    });
+
+    expect(editorHarness.editor.commands.setContent).not.toHaveBeenCalled();
+    expect(useDocumentMetadata.getState().toMetadataCandidate()).toBeUndefined();
+  });
+
+  it("does not let a reload response replace a later document selection", async () => {
+    const reloadA = deferred<DocumentResource>();
+    const requestB = deferred<DocumentResource>();
+    let requestsForA = 0;
+    const client = clientWith({
+      listDocuments: vi.fn().mockResolvedValue([
+        { id: ID_A, title: "First", revision: 1, updatedAt: CREATED_AT },
+        { id: ID_B, title: "Second", revision: 2, updatedAt: CREATED_AT },
+      ]),
+      getDocument: vi.fn((id: string) => {
+        if (id === ID_B) return requestB.promise;
+        requestsForA += 1;
+        return requestsForA === 1
+          ? Promise.resolve(resource(ID_A, 1, supportedEnvelope))
+          : reloadA.promise;
+      }),
+      updateDocument: vi.fn().mockRejectedValue(new DocumentConflictError(2)),
+    });
+    render(
+      <DocumentWorkspace client={client} confirmDiscard={() => true} />,
+    );
+    const first = await screen.findByRole("button", { name: /^First/ });
+    fireEvent.click(first);
+    await screen.findByText("revision:1");
+    fireEvent.click(screen.getByRole("button", { name: "Edit body" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    const reload = await screen.findByRole("button", {
+      name: "Reload Server Version",
+    });
+    const secondAfterConflict = screen.getByRole("button", { name: /^Second/ });
+
+    act(() => {
+      reload.click();
+      secondAfterConflict.click();
+    });
+    await act(async () => {
+      requestB.resolve(resource(ID_B, 2, EmptyPersistedDocumentEnvelope));
+      await requestB.promise;
+    });
+    await act(async () => {
+      reloadA.resolve(resource(ID_A, 3, supportedEnvelope));
+      await reloadA.promise;
+    });
+
+    expect(screen.getByText("revision:2")).toBeInTheDocument();
+    expect(editorHarness.editor.commands.setContent).toHaveBeenLastCalledWith(
+      EmptyPersistedDocumentEnvelope.editor,
+      { emitUpdate: false, errorOnInvalidContent: true },
+    );
   });
 });
