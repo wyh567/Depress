@@ -5,10 +5,12 @@ import {
   CompileSnapshotSchema,
   CslItemSchema,
   PersistedCompileJobResourceSchema,
+  PersistedCompileJobStatusSchema,
   projectPersistedDocumentToAst,
   type CompileJobCreateRequest,
   type CompileSnapshot,
   type PersistedCompileJobResource,
+  type PersistedCompileJobStatus,
 } from "@depress/ast";
 import type { Pool, PoolClient } from "pg";
 
@@ -58,6 +60,16 @@ interface CompileJobRow {
   status: string;
   created_at: Date;
   updated_at: Date;
+}
+
+interface CompileJobArtifactRow {
+  status: string;
+  artifact_key: string | null;
+}
+
+export interface CompileJobArtifactState {
+  status: PersistedCompileJobStatus;
+  artifactKey: string | null;
 }
 
 export interface CreatedCompileJob {
@@ -258,6 +270,28 @@ export function createCompileJobRepository(
       );
       const row = result.rows[0];
       return row ? toResource(row) : undefined;
+    },
+
+    async getArtifactForOwner(
+      ownerUserId: string,
+      jobId: string,
+    ): Promise<CompileJobArtifactState | undefined> {
+      const result = await pool.query<CompileJobArtifactRow>(
+        `
+          SELECT jobs.status, jobs.artifact_key
+          FROM compile_jobs AS jobs
+          JOIN projects ON projects.id = jobs.project_id
+          WHERE jobs.id = $1 AND projects.owner_user_id = $2
+        `,
+        [jobId, ownerUserId],
+      );
+      const row = result.rows[0];
+      return row
+        ? {
+            status: PersistedCompileJobStatusSchema.parse(row.status),
+            artifactKey: row.artifact_key,
+          }
+        : undefined;
     },
   };
 }

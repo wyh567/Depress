@@ -118,6 +118,18 @@ export type PersistedCompileJobStatus = z.infer<
   typeof PersistedCompileJobStatusSchema
 >;
 
+export const PersistedCompileJobErrorCodeSchema = z.enum([
+  "QUEUE_UNAVAILABLE",
+  "SNAPSHOT_HASH_MISMATCH",
+  "SNAPSHOT_INVALID",
+  "COMPILE_FAILED",
+  "UPLOAD_FAILED",
+  "JOB_STATE_INVALID",
+]);
+export type PersistedCompileJobErrorCode = z.infer<
+  typeof PersistedCompileJobErrorCodeSchema
+>;
+
 export const PersistedCompileJobResourceSchema = z
   .object({
     jobId: z.string().uuid(),
@@ -133,6 +145,25 @@ export const PersistedCompileJobResourceSchema = z
   .strict();
 export type PersistedCompileJobResource = z.infer<
   typeof PersistedCompileJobResourceSchema
+>;
+
+export const CompileJobDownloadResponseSchema = z
+  .object({
+    downloadUrl: z.string().url(),
+  })
+  .strict();
+export type CompileJobDownloadResponse = z.infer<
+  typeof CompileJobDownloadResponseSchema
+>;
+
+export const CompileJobNotReadyResponseSchema = z
+  .object({
+    error: z.literal("COMPILE_JOB_NOT_READY"),
+    status: PersistedCompileJobStatusSchema,
+  })
+  .strict();
+export type CompileJobNotReadyResponse = z.infer<
+  typeof CompileJobNotReadyResponseSchema
 >;
 
 // BullMQ job data. Same content fields as the request plus the job id

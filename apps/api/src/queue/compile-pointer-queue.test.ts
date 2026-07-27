@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   COMPILE_POINTER_JOB_NAME,
   COMPILE_POINTER_QUEUE_NAME,
+  COMPILE_POINTER_ATTEMPTS,
+  COMPILE_POINTER_BACKOFF_MS,
   createBullmqCompilePointerQueue,
 } from "./compile-pointer-queue";
 import { COMPILE_QUEUE_NAME } from "./compile-queue";
@@ -13,7 +15,11 @@ describe("persisted compile pointer queue", () => {
       async (
         _name: string,
         _data: unknown,
-        _options: { jobId: string },
+        _options: {
+          jobId: string;
+          attempts: number;
+          backoff: { type: "exponential"; delay: number };
+        },
       ) => {
         void _name;
         void _data;
@@ -35,7 +41,14 @@ describe("persisted compile pointer queue", () => {
     expect(add).toHaveBeenCalledWith(
       COMPILE_POINTER_JOB_NAME,
       pointer,
-      { jobId: pointer.jobId },
+      {
+        jobId: pointer.jobId,
+        attempts: COMPILE_POINTER_ATTEMPTS,
+        backoff: {
+          type: "exponential",
+          delay: COMPILE_POINTER_BACKOFF_MS,
+        },
+      },
     );
     expect(Object.keys(add.mock.calls[0]![1] as object).sort()).toEqual([
       "jobId",

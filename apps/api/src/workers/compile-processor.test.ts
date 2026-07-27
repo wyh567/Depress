@@ -34,7 +34,7 @@ const validPayload = () => ({
 });
 
 function fakeSandbox(
-  impl: (project: TypstCompileProject) => Promise<Buffer> = async () => Buffer.from("%PDF")
+  impl: (project: TypstCompileProject) => Promise<Buffer> = async () => Buffer.from("%PDF-1.7")
 ) {
   const compile = vi.fn(impl);
   const sandbox: TypstSandboxRunner = { compile };
@@ -169,6 +169,17 @@ describe("processCompileJob", () => {
     expect(uploadArtifact).not.toHaveBeenCalled();
   });
 
+  it("rejects non-PDF sandbox output before upload", async () => {
+    const { sandbox } = fakeSandbox(async () => Buffer.from("not a pdf"));
+    const { artifacts, uploadArtifact } = fakeArtifacts();
+    const outcome = await processCompileJob(validPayload(), {
+      sandbox,
+      artifacts,
+    });
+    expect(outcome).toEqual({ status: "failed", error: "COMPILE_FAILED" });
+    expect(uploadArtifact).not.toHaveBeenCalled();
+  });
+
   it("maps upload failures to a safe UPLOAD_FAILED error", async () => {
     const { sandbox } = fakeSandbox();
     const { artifacts } = fakeArtifacts(async () => {
@@ -206,7 +217,7 @@ describe("processCompileJob", () => {
         queueMicrotask(() => {
           void Promise.all([
             fs.writeFile(args[args.indexOf("--cidfile") + 1] ?? "", "b".repeat(64)),
-            fs.writeFile(join(workDir, SANDBOX_OUTPUT_FILE), Buffer.from("%PDF")),
+            fs.writeFile(join(workDir, SANDBOX_OUTPUT_FILE), Buffer.from("%PDF-1.7")),
           ]).then(() => child.emit("close", 0, null));
         });
         return child;

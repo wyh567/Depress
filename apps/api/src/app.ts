@@ -67,7 +67,12 @@ export function buildApp(
     if (options.database) {
       registerDocumentRoutes(app, options.auth, options.database);
       registerReferenceRoutes(app, options.auth, options.database);
-      registerCompileJobRoutes(app, options.auth, options.database);
+      registerCompileJobRoutes(
+        app,
+        options.auth,
+        options.database,
+        options.signArtifactUrl,
+      );
     }
   }
   return app;
