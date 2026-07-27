@@ -5,10 +5,14 @@ import { z } from "zod";
 // buildApp or unit tests.
 const RuntimeEnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   REDIS_HOST: z.string().min(1).default("localhost"),
   REDIS_PORT: z.coerce.number().int().positive().default(6379),
   // Browser origin allowed by CORS (the Next.js dev server by default).
   CORS_ORIGIN: z.string().url().default("http://localhost:3000"),
+  DATABASE_URL: z.string().min(1),
+  BETTER_AUTH_SECRET: z.string().min(32),
+  AUTH_ORIGIN: z.string().url().default("http://localhost:3000"),
   // Optional Crossref polite-pool contact (not a secret). Recommended in
   // production so Crossref can reach operators; local boot works without it.
   CROSSREF_MAILTO: z.preprocess(

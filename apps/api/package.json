@@ -8,6 +8,7 @@
   },
   "scripts": {
     "db:migrate": "tsx src/db/migrate-main.ts",
+    "auth:seed-mentor": "tsx src/auth/seed-mentor-main.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -20,6 +21,7 @@
     "@depress/ast": "workspace:*",
     "@depress/transformers": "workspace:*",
     "@fastify/cors": "^11.0.0",
+    "better-auth": "1.6.25",
     "bullmq": "^5.79.0",
     "fastify": "^5.4.0",
     "pg": "^8.22.0",
@@ -27,6 +29,7 @@
   },
   "devDependencies": {
     "@types/pg": "^8.20.0",
+    "auth": "1.6.25",
     "tsx": "^4.19.0",
     "vitest": "^3.2.0"
   }

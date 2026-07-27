@@ -12,6 +12,8 @@ import {
   type JobReader,
 } from "./services/job-reader";
 import type { CrossrefClient } from "./services/crossref/crossref-client";
+import type { MentorAuth } from "./auth/auth";
+import { registerAuthRoutes } from "./auth/fastify-auth";
 
 // buildApp never listens on a port — callers (tests via app.inject, a future
 // server entrypoint via app.listen) decide that. Each app gets its own job
@@ -39,6 +41,8 @@ export function buildApp(
     crossref?: CrossrefClient;
     crossrefMailto?: string;
     fetchFn?: typeof fetch;
+    auth?: MentorAuth;
+    authOrigin?: string;
   } = {},
 ): FastifyInstance {
   const app = Fastify();
@@ -52,6 +56,10 @@ export function buildApp(
     ...(options.crossrefMailto ? { mailto: options.crossrefMailto } : {}),
     ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
   });
+  if (options.auth) {
+    if (!options.authOrigin) throw new Error("authOrigin is required when auth is configured");
+    registerAuthRoutes(app, options.auth, options.authOrigin);
+  }
   return app;
 }
 
