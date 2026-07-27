@@ -66,8 +66,8 @@ export const Citation = Node.create<CitationOptions>({
           this.options.isCitationKnown !== undefined && !this.options.isCitationKnown(citeKey);
         dom.classList.toggle("citation-unknown", unknown);
         if (unknown) {
-          dom.title = "引用库中不存在该文献";
-          dom.setAttribute("aria-label", `未知引用 ${citeKey}`);
+          dom.title = "This citeKey is not present in the persisted reference library.";
+          dom.setAttribute("aria-label", `Unresolved citation ${citeKey}`);
         } else {
           dom.removeAttribute("title");
           dom.removeAttribute("aria-label");

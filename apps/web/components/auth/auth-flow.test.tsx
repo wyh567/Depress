@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthenticatedAppGate } from "./authenticated-app-gate";
 import { LoginForm } from "./login-form";
+import { useReferenceLibrary } from "@/stores/reference-library";
 
 const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   signInEmail: vi.fn(),
   signOut: vi.fn(),
   useSession: vi.fn(),
+  listReferences: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -27,9 +29,22 @@ vi.mock("@/lib/auth-client", () => ({
   },
 }));
 
+vi.mock("@/lib/reference-client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/reference-client")>();
+  return {
+    ...actual,
+    referenceClient: {
+      ...actual.referenceClient,
+      listReferences: mocks.listReferences,
+    },
+  };
+});
+
 describe("mentor authentication flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.listReferences.mockResolvedValue([]);
+    useReferenceLibrary.getState().clear();
     mocks.useSession.mockReturnValue({
       data: null,
       isPending: false,
@@ -76,7 +91,7 @@ describe("mentor authentication flow", () => {
     expect(mocks.replace).not.toHaveBeenCalledWith("/");
   });
 
-  it("restores an authenticated session after reload", () => {
+  it("restores an authenticated session and its reference library after reload", async () => {
     mocks.useSession.mockReturnValue({
       data: {
         user: { id: "mentor-id", name: "Mentor", email: "mentor@example.test" },
@@ -91,6 +106,8 @@ describe("mentor authentication flow", () => {
       </AuthenticatedAppGate>,
     );
     expect(screen.getByText("Authenticated application")).toBeInTheDocument();
+    await waitFor(() => expect(mocks.listReferences).toHaveBeenCalledTimes(1));
+    expect(useReferenceLibrary.getState().activeUserId).toBe("mentor-id");
     expect(mocks.replace).not.toHaveBeenCalledWith("/login");
   });
 
@@ -104,6 +121,10 @@ describe("mentor authentication flow", () => {
       error: null,
     });
     mocks.signOut.mockResolvedValue({ data: { success: true }, error: null });
+    useReferenceLibrary.setState({
+      items: [{ id: "persisted", type: "book", title: "Persisted" }],
+      lastConfirmedItems: [{ id: "persisted", type: "book", title: "Persisted" }],
+    });
     render(
       <AuthenticatedAppGate>
         <p>Authenticated application</p>
@@ -112,6 +133,7 @@ describe("mentor authentication flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
     await waitFor(() => expect(mocks.signOut).toHaveBeenCalledTimes(1));
+    expect(useReferenceLibrary.getState().items).toEqual([]);
     expect(mocks.replace).toHaveBeenCalledWith("/login");
   });
 });

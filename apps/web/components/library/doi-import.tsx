@@ -15,6 +15,12 @@ export function DoiImport() {
 
   const submit = async () => {
     if (inFlight.current || phase === "loading") return;
+    const referenceSession = useReferenceLibrary.getState().captureSession();
+    if (!referenceSession) {
+      setPhase("error");
+      setMessage("Reference library session is unavailable.");
+      return;
+    }
     inFlight.current = true;
     setPhase("loading");
     setMessage(null);
@@ -23,14 +29,13 @@ export function DoiImport() {
         apiUrl: process.env["NEXT_PUBLIC_API_URL"] ?? "http://localhost:3001",
         hasId: has,
         hasDoi,
-        tryAdd,
+        tryAdd: (item) => tryAdd(item, undefined, referenceSession),
       });
+      setPhase(result.phase);
       if (result.phase === "success") {
-        setPhase("success");
-        setMessage(`已导入：${result.item.title}`);
+        setMessage(`Imported: ${result.item.title}`);
         setDoi("");
       } else {
-        setPhase(result.phase);
         setMessage(result.message);
       }
     } finally {
@@ -38,36 +43,21 @@ export function DoiImport() {
     }
   };
 
-  const inputCls =
-    "w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none";
   const loading = phase === "loading";
-
   return (
     <div className="space-y-2 border-b border-gray-200 p-3">
-      <p className="text-xs font-semibold text-gray-500">DOI 导入</p>
+      <p className="text-xs font-semibold text-gray-500">Import by DOI</p>
       <input
+        aria-label="DOI"
         value={doi}
-        onChange={(e) => setDoi(e.target.value)}
-        placeholder="10.1000/xyz 或 https://doi.org/…"
+        onChange={(event) => setDoi(event.target.value)}
         disabled={loading}
-        className={inputCls}
+        className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
       />
-      <button
-        onClick={() => void submit()}
-        disabled={loading || !doi.trim()}
-        className="w-full rounded bg-emerald-700 py-1.5 text-sm text-white hover:bg-emerald-800 disabled:opacity-40"
-      >
-        {loading ? "查询中…" : "从 Crossref 导入"}
+      <button type="button" onClick={() => void submit()} disabled={loading || !doi.trim()} className="w-full rounded bg-emerald-700 py-1.5 text-sm text-white">
+        {loading ? "Looking up…" : "Import from Crossref"}
       </button>
-      {message && (
-        <p
-          className={
-            phase === "success" ? "text-xs text-emerald-700" : "text-xs text-red-600"
-          }
-        >
-          {message}
-        </p>
-      )}
+      {message && <p role={phase === "success" ? "status" : "alert"} className="text-xs">{message}</p>}
     </div>
   );
 }

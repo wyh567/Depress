@@ -9,6 +9,10 @@ export interface ProjectReferenceRecord {
   updatedAt: Date;
 }
 
+export type CreateReferenceResult =
+  | { status: "created"; reference: ProjectReferenceRecord }
+  | { status: "duplicate" };
+
 interface ReferenceRow {
   project_id: string;
   cite_key: string;
@@ -33,6 +37,29 @@ function parseReference(row: ReferenceRow): ProjectReferenceRecord {
 
 export function createReferenceRepository(pool: Pool) {
   return {
+    async create(input: {
+      projectId: string;
+      item: unknown;
+    }): Promise<CreateReferenceResult> {
+      const item = CslItemSchema.parse(input.item);
+      const result = await pool.query<ReferenceRow>(
+        `
+          INSERT INTO project_references (
+            project_id, cite_key, item_json
+          )
+          VALUES ($1, $2, $3::jsonb)
+          ON CONFLICT (project_id, cite_key) DO NOTHING
+          RETURNING
+            project_id, cite_key, item_json, created_at, updated_at
+        `,
+        [input.projectId, item.id, JSON.stringify(item)]
+      );
+      const created = result.rows[0];
+      return created
+        ? { status: "created", reference: parseReference(created) }
+        : { status: "duplicate" };
+    },
+
     async upsert(input: { projectId: string; item: unknown }): Promise<ProjectReferenceRecord> {
       const item = CslItemSchema.parse(input.item);
       const result = await pool.query<ReferenceRow>(
@@ -64,6 +91,29 @@ export function createReferenceRepository(pool: Pool) {
         [projectId]
       );
       return result.rows.map(parseReference);
+    },
+
+    async update(input: {
+      projectId: string;
+      citeKey: string;
+      item: unknown;
+    }): Promise<ProjectReferenceRecord | undefined> {
+      const item = CslItemSchema.parse(input.item);
+      if (item.id !== input.citeKey) {
+        throw new Error("REFERENCE_IDENTITY_MISMATCH");
+      }
+      const result = await pool.query<ReferenceRow>(
+        `
+          UPDATE project_references
+          SET item_json = $1::jsonb, updated_at = now()
+          WHERE project_id = $2 AND cite_key = $3
+          RETURNING
+            project_id, cite_key, item_json, created_at, updated_at
+        `,
+        [JSON.stringify(item), input.projectId, input.citeKey]
+      );
+      const updated = result.rows[0];
+      return updated ? parseReference(updated) : undefined;
     },
 
     async remove(projectId: string, citeKey: string): Promise<boolean> {

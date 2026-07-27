@@ -16,6 +16,7 @@ import type { MentorAuth } from "./auth/auth";
 import { registerAuthRoutes } from "./auth/fastify-auth";
 import type { Pool } from "pg";
 import { registerDocumentRoutes } from "./routes/documents";
+import { registerReferenceRoutes } from "./routes/references";
 
 // buildApp never listens on a port — callers (tests via app.inject, a future
 // server entrypoint via app.listen) decide that. Each app gets its own job
@@ -48,7 +49,7 @@ export function buildApp(
     database?: Pool;
   } = {},
 ): FastifyInstance {
-  const app = Fastify();
+  const app = Fastify({ routerOptions: { maxParamLength: 1024 } });
   const store = options.store ?? createJobStore();
   const queue = options.queue ?? createInMemoryCompileQueue();
   const jobs = options.jobs ?? createStoreJobReader(store);
@@ -64,6 +65,7 @@ export function buildApp(
     registerAuthRoutes(app, options.auth, options.authOrigin);
     if (options.database) {
       registerDocumentRoutes(app, options.auth, options.database);
+      registerReferenceRoutes(app, options.auth, options.database);
     }
   }
   return app;

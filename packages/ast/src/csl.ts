@@ -13,6 +13,7 @@ export const CslAuthorSchema = z
     // 不拆分的姓名(如中文作者)
     literal: trimmedNonEmpty.optional(),
   })
+  .strict()
   .refine((a) => a.family !== undefined || a.literal !== undefined, {
     message: "作者需要 family 或 literal 之一",
   });
@@ -32,18 +33,23 @@ export type CslItemType = z.infer<typeof CslItemTypeSchema>;
 // Phase 3 bibliography subset: enough for IEEE / Elsevier / GB/T journal
 // articles, books, and webpages. Speculative CSL fields are intentionally
 // omitted until a concrete template needs them.
-export const CslItemSchema = z.object({
-  id: trimmedNonEmpty,
-  type: CslItemTypeSchema,
-  title: trimmedNonEmpty,
-  author: z.array(CslAuthorSchema).optional(),
-  issued: z.object({ "date-parts": z.array(z.array(z.number().int())) }).optional(),
-  "container-title": trimmedNonEmpty.optional(),
-  DOI: trimmedNonEmpty.optional(),
-  volume: trimmedNonEmpty.optional(),
-  issue: trimmedNonEmpty.optional(),
-  page: trimmedNonEmpty.optional(),
-  publisher: trimmedNonEmpty.optional(),
-  URL: trimmedNonEmpty.optional(),
-});
+export const CslItemSchema = z
+  .object({
+    id: trimmedNonEmpty,
+    type: CslItemTypeSchema,
+    title: trimmedNonEmpty,
+    author: z.array(CslAuthorSchema).optional(),
+    issued: z
+      .object({ "date-parts": z.array(z.array(z.number().int())) })
+      .strict()
+      .optional(),
+    "container-title": trimmedNonEmpty.optional(),
+    DOI: trimmedNonEmpty.optional(),
+    volume: trimmedNonEmpty.optional(),
+    issue: trimmedNonEmpty.optional(),
+    page: trimmedNonEmpty.optional(),
+    publisher: trimmedNonEmpty.optional(),
+    URL: trimmedNonEmpty.optional(),
+  })
+  .strict();
 export type CslItem = z.infer<typeof CslItemSchema>;

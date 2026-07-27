@@ -6,3 +6,4 @@ export * from "./normalize-doi";
 export * from "./doi-lookup";
 export * from "./persisted-document";
 export * from "./document-api";
+export * from "./reference-api";

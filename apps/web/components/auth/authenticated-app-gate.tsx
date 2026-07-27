@@ -3,15 +3,23 @@
 import { useRouter } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
 import { authClient } from "@/lib/auth-client";
+import { useReferenceLibrary } from "@/stores/reference-library";
 
 export function AuthenticatedAppGate({ children }: { children: ReactNode }) {
   const router = useRouter();
   const session = authClient.useSession();
+  const authenticatedUserId = session.data?.user.id;
   const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
-    if (!session.isPending && !session.data) router.replace("/login");
-  }, [router, session.data, session.isPending]);
+    if (session.isPending) return;
+    if (!authenticatedUserId) {
+      useReferenceLibrary.getState().clear();
+      router.replace("/login");
+      return;
+    }
+    void useReferenceLibrary.getState().load(authenticatedUserId);
+  }, [authenticatedUserId, router, session.isPending]);
 
   if (session.isPending) {
     return <p role="status">Restoring session…</p>;
@@ -23,6 +31,7 @@ export function AuthenticatedAppGate({ children }: { children: ReactNode }) {
 
   async function signOut() {
     setSigningOut(true);
+    useReferenceLibrary.getState().clear();
     await authClient.signOut();
     router.replace("/login");
     router.refresh();

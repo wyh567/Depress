@@ -31,7 +31,12 @@ export interface DoiImportDeps {
   hasDoi: (doi: string) => boolean;
   tryAdd: (
     item: CslItem,
-  ) => { outcome: "added"; item: CslItem } | { outcome: "duplicate_id" } | { outcome: "duplicate_doi" };
+  ) => Promise<
+    | { outcome: "added"; item: CslItem }
+    | { outcome: "duplicate_id" }
+    | { outcome: "duplicate_doi" }
+    | { outcome: "failed" }
+  >;
   fetchFn?: typeof fetch;
 }
 
@@ -113,7 +118,10 @@ export async function runDoiImport(
     return { phase: "already_exists", message: "reference already exists" };
   }
 
-  const added = deps.tryAdd(parsed.data.item);
+  const added = await deps.tryAdd(parsed.data.item);
+  if (added.outcome === "failed") {
+    return { phase: "error", message: "Reference could not be saved." };
+  }
   if (added.outcome !== "added") {
     return { phase: "already_exists", message: "reference already exists" };
   }

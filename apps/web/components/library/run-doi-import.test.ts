@@ -18,7 +18,7 @@ function jsonResponse(status: number, body: unknown): Response {
 
 describe("runDoiImport", () => {
   it("adds one item on successful lookup", async () => {
-    const tryAdd = vi.fn(() => ({ outcome: "added" as const, item }));
+    const tryAdd = vi.fn(async () => ({ outcome: "added" as const, item }));
     const fetchFn = vi.fn(async () =>
       jsonResponse(200, { ok: true, item }),
     );
@@ -40,7 +40,7 @@ describe("runDoiImport", () => {
       apiUrl: "http://api.test",
       hasId: () => true,
       hasDoi: () => false,
-      tryAdd: () => ({ outcome: "added", item }),
+      tryAdd: async () => ({ outcome: "added", item }),
       fetchFn: fetchFn as typeof fetch,
     });
     expect(result.phase).toBe("already_exists");
@@ -53,7 +53,7 @@ describe("runDoiImport", () => {
       apiUrl: "http://api.test",
       hasId: () => false,
       hasDoi: () => true,
-      tryAdd: () => ({ outcome: "added", item }),
+      tryAdd: async () => ({ outcome: "added", item }),
       fetchFn: fetchFn as typeof fetch,
     });
     expect(result.phase).toBe("already_exists");
@@ -66,7 +66,7 @@ describe("runDoiImport", () => {
       apiUrl: "http://api.test",
       hasId: () => false,
       hasDoi: (doi) => doi === "10.1000/abc",
-      tryAdd: () => ({ outcome: "added", item }),
+      tryAdd: async () => ({ outcome: "added", item }),
       fetchFn: fetchFn as typeof fetch,
     });
     expect(result.phase).toBe("already_exists");
@@ -112,7 +112,7 @@ describe("runDoiImport", () => {
       apiUrl: "http://api.test",
       hasId: () => false,
       hasDoi: () => false,
-      tryAdd: () => ({ outcome: "added", item }),
+      tryAdd: async () => ({ outcome: "added", item }),
       fetchFn: (async () =>
         jsonResponse(429, {
           ok: false,
@@ -125,7 +125,7 @@ describe("runDoiImport", () => {
       apiUrl: "http://api.test",
       hasId: () => false,
       hasDoi: () => false,
-      tryAdd: () => ({ outcome: "added", item }),
+      tryAdd: async () => ({ outcome: "added", item }),
       fetchFn: (async () =>
         jsonResponse(504, {
           ok: false,
