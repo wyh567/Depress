@@ -7,6 +7,7 @@
     ".": "./src/app.ts"
   },
   "scripts": {
+    "db:migrate": "tsx src/db/migrate-main.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -21,9 +22,11 @@
     "@fastify/cors": "^11.0.0",
     "bullmq": "^5.79.0",
     "fastify": "^5.4.0",
+    "pg": "^8.22.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
+    "@types/pg": "^8.20.0",
     "tsx": "^4.19.0",
     "vitest": "^3.2.0"
   }
