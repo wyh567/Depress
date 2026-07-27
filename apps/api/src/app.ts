@@ -14,6 +14,8 @@ import {
 import type { CrossrefClient } from "./services/crossref/crossref-client";
 import type { MentorAuth } from "./auth/auth";
 import { registerAuthRoutes } from "./auth/fastify-auth";
+import type { Pool } from "pg";
+import { registerDocumentRoutes } from "./routes/documents";
 
 // buildApp never listens on a port — callers (tests via app.inject, a future
 // server entrypoint via app.listen) decide that. Each app gets its own job
@@ -43,6 +45,7 @@ export function buildApp(
     fetchFn?: typeof fetch;
     auth?: MentorAuth;
     authOrigin?: string;
+    database?: Pool;
   } = {},
 ): FastifyInstance {
   const app = Fastify();
@@ -59,6 +62,9 @@ export function buildApp(
   if (options.auth) {
     if (!options.authOrigin) throw new Error("authOrigin is required when auth is configured");
     registerAuthRoutes(app, options.auth, options.authOrigin);
+    if (options.database) {
+      registerDocumentRoutes(app, options.auth, options.database);
+    }
   }
   return app;
 }

@@ -28,6 +28,7 @@ async function main(): Promise<void> {
     ...(env.CROSSREF_MAILTO ? { crossrefMailto: env.CROSSREF_MAILTO } : {}),
     auth,
     authOrigin: env.AUTH_ORIGIN,
+    database: pool,
   });
   // Browser calls cross origins (web on :3000, API on :3001); only the
   // configured web origin is allowed.

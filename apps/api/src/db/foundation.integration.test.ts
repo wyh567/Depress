@@ -87,6 +87,9 @@ describeDatabase("mentor MVP foundation repositories", () => {
     expect(created.revision).toBe(1);
     expect(created.contentHash).toMatch(/^[0-9a-f]{64}$/);
     expect(created.envelope).toEqual(firstEnvelope);
+    expect((await documents.list(project.id)).map((document) => document.id)).toEqual([
+      created.id,
+    ]);
 
     const saved = await documents.save({
       projectId: project.id,

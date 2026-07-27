@@ -71,6 +71,19 @@ export function createDocumentRepository(pool: Pool) {
       return parseDocument(result.rows[0]!);
     },
 
+    async list(projectId: string): Promise<DocumentRecord[]> {
+      const result = await pool.query<DocumentRow>(
+        `
+          SELECT ${DOCUMENT_COLUMNS}
+          FROM documents
+          WHERE project_id = $1
+          ORDER BY updated_at DESC, id
+        `,
+        [projectId]
+      );
+      return result.rows.map(parseDocument);
+    },
+
     async get(input: {
       projectId: string;
       documentId: string;
