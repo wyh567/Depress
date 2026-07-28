@@ -3,14 +3,8 @@ import { createJobStore, type JobStore } from "./services/job-store";
 import { registerCompileRoute } from "./routes/compile";
 import { registerJobsRoute, type ArtifactUrlSigner } from "./routes/jobs";
 import { registerReferencesDoiRoute } from "./routes/references-doi";
-import {
-  createInMemoryCompileQueue,
-  type CompileQueue,
-} from "./queue/compile-queue";
-import {
-  createStoreJobReader,
-  type JobReader,
-} from "./services/job-reader";
+import { createInMemoryCompileQueue, type CompileQueue } from "./queue/compile-queue";
+import { createStoreJobReader, type JobReader } from "./services/job-reader";
 import type { CrossrefClient } from "./services/crossref/crossref-client";
 import type { MentorAuth } from "./auth/auth";
 import { registerAuthRoutes } from "./auth/fastify-auth";
@@ -48,9 +42,13 @@ export function buildApp(
     auth?: MentorAuth;
     authOrigin?: string;
     database?: Pool;
-  } = {},
+    logLevel?: "fatal" | "error" | "warn" | "info" | "debug";
+  } = {}
 ): FastifyInstance {
-  const app = Fastify({ routerOptions: { maxParamLength: 1024 } });
+  const app = Fastify({
+    logger: options.logLevel ? { level: options.logLevel } : false,
+    routerOptions: { maxParamLength: 1024 },
+  });
   const store = options.store ?? createJobStore();
   const queue = options.queue ?? createInMemoryCompileQueue();
   const jobs = options.jobs ?? createStoreJobReader(store);
@@ -67,12 +65,7 @@ export function buildApp(
     if (options.database) {
       registerDocumentRoutes(app, options.auth, options.database);
       registerReferenceRoutes(app, options.auth, options.database);
-      registerCompileJobRoutes(
-        app,
-        options.auth,
-        options.database,
-        options.signArtifactUrl,
-      );
+      registerCompileJobRoutes(app, options.auth, options.database, options.signArtifactUrl);
     }
   }
   return app;

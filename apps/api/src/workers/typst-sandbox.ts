@@ -10,11 +10,11 @@ import {
   TYPST_ENTRYPOINT_FILE,
   type TypstCompileProject,
 } from "@depress/transformers";
+import { PINNED_TYPST_IMAGE } from "../env";
 
 // Code-owned immutable image identity. Do not add a request or environment
 // override: compile input must never select executable sandbox infrastructure.
-export const DEFAULT_TYPST_IMAGE =
-  "ghcr.io/typst/typst@sha256:b23ba03da5c085a2c8780bc9f2296db937abe1d0c75348cf2f8a9273199c3a14";
+export const DEFAULT_TYPST_IMAGE = PINNED_TYPST_IMAGE;
 
 // Immutable bundled fallback for CJK semantic content. This code-owned asset
 // is mounted read-only; compile input cannot select a host path or font.
@@ -64,9 +64,7 @@ type ResolveSandboxRuntimeIdentity = () => SandboxRuntimeIdentity | undefined;
 
 const INVALID_RUNTIME_IDENTITY_MESSAGE = "Sandbox runtime identity resolution failed";
 
-function validateSandboxRuntimeIdentity(
-  identity: SandboxRuntimeIdentity
-): SandboxRuntimeIdentity {
+function validateSandboxRuntimeIdentity(identity: SandboxRuntimeIdentity): SandboxRuntimeIdentity {
   if (
     !Number.isSafeInteger(identity.uid) ||
     identity.uid <= 0 ||
@@ -104,6 +102,8 @@ export function buildTypstDockerArgs(options: {
   runId: string;
   cidFile: string;
   runtimeIdentity?: SandboxRuntimeIdentity;
+  image?: string;
+  fontDirectory?: string;
 }): string[] {
   return [
     "run",
@@ -135,12 +135,12 @@ export function buildTypstDockerArgs(options: {
     "-v",
     `${options.workDir}:/work`,
     "-v",
-    `${TYPST_FONT_DIRECTORY}:/fonts:ro`,
+    `${options.fontDirectory ?? TYPST_FONT_DIRECTORY}:/fonts:ro`,
     "-w",
     "/work",
     "--entrypoint",
     "typst",
-    DEFAULT_TYPST_IMAGE,
+    options.image ?? DEFAULT_TYPST_IMAGE,
     "compile",
     "--font-path",
     "/fonts",
@@ -444,6 +444,8 @@ export function createTypstSandboxRunner(
     createRunId?: () => string;
     createRunDirectory?: () => Promise<string>;
     resolveRuntimeIdentity?: ResolveSandboxRuntimeIdentity;
+    image?: string;
+    fontDirectory?: string;
     timings?: Partial<SandboxTimings>;
   } = {}
 ): TypstSandboxRunner {
@@ -487,6 +489,8 @@ export function createTypstSandboxRunner(
             workDir,
             runId,
             cidFile,
+            ...(options.image ? { image: options.image } : {}),
+            ...(options.fontDirectory ? { fontDirectory: options.fontDirectory } : {}),
             ...(runtimeIdentity === undefined ? {} : { runtimeIdentity }),
           }),
           {

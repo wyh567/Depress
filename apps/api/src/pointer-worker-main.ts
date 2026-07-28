@@ -1,13 +1,16 @@
 import { createPostgresPool } from "./db/pool";
-import { parseRuntimeEnv, redisConnection } from "./env";
+import { parsePointerWorkerEnv, redisConnection } from "./env";
 import { startCompilePointerWorker } from "./workers/compile-pointer-worker";
 
 async function main(): Promise<void> {
-  const env = parseRuntimeEnv(process.env);
+  const env = parsePointerWorkerEnv(process.env);
   const pool = createPostgresPool(env.DATABASE_URL);
   const worker = await startCompilePointerWorker({
     connection: redisConnection(env),
     pool,
+    concurrency: env.POINTER_WORKER_CONCURRENCY,
+    typstImage: env.TYPST_IMAGE,
+    ...(env.TYPST_FONT_PATH ? { typstFontDirectory: env.TYPST_FONT_PATH } : {}),
   });
   console.log("DePress persisted compile pointer worker started");
 

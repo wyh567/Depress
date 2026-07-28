@@ -1,7 +1,4 @@
-import {
-  CompileQueuePointerSchema,
-  type CompileQueuePointer,
-} from "@depress/ast";
+import { CompileQueuePointerSchema, type CompileQueuePointer } from "@depress/ast";
 
 export const COMPILE_POINTER_QUEUE_NAME = "compile-pointers";
 export const COMPILE_POINTER_JOB_NAME = "compile-pointer";
@@ -10,6 +7,7 @@ export const COMPILE_POINTER_BACKOFF_MS = 5_000;
 
 export interface CompilePointerQueue {
   enqueue(payload: CompileQueuePointer): Promise<void>;
+  close?(): Promise<void>;
 }
 
 interface BullmqQueuePort {
@@ -20,8 +18,9 @@ interface BullmqQueuePort {
       jobId: string;
       attempts: number;
       backoff: { type: "exponential"; delay: number };
-    },
+    }
   ): Promise<unknown>;
+  close?(): Promise<void>;
 }
 
 export function createInMemoryCompilePointerQueue(): CompilePointerQueue & {
@@ -36,10 +35,17 @@ export function createInMemoryCompilePointerQueue(): CompilePointerQueue & {
   };
 }
 
-export function createBullmqCompilePointerQueue(connection: {
-  host: string;
-  port: number;
-}, createQueue?: () => Promise<BullmqQueuePort>): CompilePointerQueue {
+export function createBullmqCompilePointerQueue(
+  connection: {
+    host: string;
+    port: number;
+    username?: string;
+    password?: string;
+    db?: number;
+    tls?: Record<string, never>;
+  },
+  createQueue?: () => Promise<BullmqQueuePort>
+): CompilePointerQueue {
   let queuePromise: Promise<BullmqQueuePort> | null = null;
 
   return {
@@ -47,10 +53,7 @@ export function createBullmqCompilePointerQueue(connection: {
       const parsed = CompileQueuePointerSchema.parse(payload);
       queuePromise ??=
         createQueue?.() ??
-        import("bullmq").then(
-          ({ Queue }) =>
-            new Queue(COMPILE_POINTER_QUEUE_NAME, { connection }),
-        );
+        import("bullmq").then(({ Queue }) => new Queue(COMPILE_POINTER_QUEUE_NAME, { connection }));
       const queue = await queuePromise;
       await queue.add(COMPILE_POINTER_JOB_NAME, parsed, {
         jobId: parsed.jobId,
@@ -60,6 +63,13 @@ export function createBullmqCompilePointerQueue(connection: {
           delay: COMPILE_POINTER_BACKOFF_MS,
         },
       });
+    },
+    async close() {
+      if (!queuePromise) return;
+      const queue = await queuePromise;
+      if ("close" in queue && typeof queue.close === "function") {
+        await queue.close();
+      }
     },
   };
 }

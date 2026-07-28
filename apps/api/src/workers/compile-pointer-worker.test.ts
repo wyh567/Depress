@@ -8,9 +8,7 @@ import { startCompilePointerWorker } from "./compile-pointer-worker";
 describe("persisted compile pointer worker wiring", () => {
   it("reconciles before consuming only the isolated pointer queue", async () => {
     const order: string[] = [];
-    let processor:
-      | ((job: { id?: string; data: unknown }) => Promise<unknown>)
-      | undefined;
+    let processor: ((job: { id?: string; data: unknown }) => Promise<unknown>) | undefined;
     const handle = { close: vi.fn(async () => undefined) };
     const repository = {
       load: vi.fn(async () => undefined),
@@ -38,6 +36,7 @@ describe("persisted compile pointer worker wiring", () => {
         expect(options).toMatchObject({
           lockDuration: 30_000,
           maxStalledCount: 2,
+          concurrency: 1,
         });
         processor = workerProcessor;
         return handle;
@@ -50,7 +49,7 @@ describe("persisted compile pointer worker wiring", () => {
       processor?.({
         id: randomUUID(),
         data: { jobId: randomUUID(), snapshotHash: "a".repeat(64) },
-      }),
+      })
     ).rejects.toThrow("JOB_STATE_INVALID");
   });
 });

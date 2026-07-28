@@ -1,6 +1,8 @@
 import cors from "@fastify/cors";
+import { Queue } from "bullmq";
 import { buildApp } from "./app";
-import { parseRuntimeEnv, redisConnection } from "./env";
+import { parseApiEnv, redisConnection } from "./env";
+import { registerHealthRoutes } from "./health";
 import { createBullmqCompileQueue } from "./queue/compile-queue";
 import { createBullmqJobReader } from "./services/job-reader";
 // Importing services/s3 here (and only here on the API side) triggers its
@@ -11,7 +13,7 @@ import { createMentorAuth } from "./auth/auth";
 import { createPostgresPool } from "./db/pool";
 
 async function main(): Promise<void> {
-  const env = parseRuntimeEnv(process.env);
+  const env = parseApiEnv(process.env);
   const connection = redisConnection(env);
   const s3 = createS3ArtifactService();
   const pool = createPostgresPool(env.DATABASE_URL);
@@ -29,11 +31,17 @@ async function main(): Promise<void> {
     auth,
     authOrigin: env.AUTH_ORIGIN,
     database: pool,
+    logLevel: env.LOG_LEVEL,
   });
   // Browser calls cross origins (web on :3000, API on :3001); only the
   // configured web origin is allowed.
-  await app.register(cors, { origin: env.CORS_ORIGIN, credentials: true });
+  await app.register(cors, { origin: env.PUBLIC_ORIGIN, credentials: true });
+  const readinessQueue = new Queue("__depress_readiness", { connection });
+  registerHealthRoutes(app, async () => {
+    await Promise.all([pool.query("SELECT 1"), readinessQueue.waitUntilReady()]);
+  });
   app.addHook("onClose", async () => {
+    await readinessQueue.close();
     await pool.end();
   });
 
@@ -44,8 +52,8 @@ async function main(): Promise<void> {
   process.on("SIGINT", close);
   process.on("SIGTERM", close);
 
-  await app.listen({ port: env.PORT, host: "0.0.0.0" });
-  console.log(`DePress API listening on :${env.PORT}`);
+  await app.listen({ port: env.API_PORT, host: env.API_BIND_HOST });
+  console.log(`DePress API listening on ${env.API_BIND_HOST}:${env.API_PORT}`);
 }
 
 main().catch((error) => {

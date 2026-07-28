@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useReferenceLibrary } from "@/stores/reference-library";
 import { runDoiImport, type DoiImportPhase } from "./run-doi-import";
+import { clientApiOrigin } from "@/lib/api-origin";
 
 export function DoiImport() {
   const has = useReferenceLibrary((state) => state.has);
@@ -26,7 +27,7 @@ export function DoiImport() {
     setMessage(null);
     try {
       const result = await runDoiImport(doi, {
-        apiUrl: process.env["NEXT_PUBLIC_API_URL"] ?? "http://localhost:3001",
+        apiUrl: clientApiOrigin(),
         hasId: has,
         hasDoi,
         tryAdd: (item) => tryAdd(item, undefined, referenceSession),
@@ -54,10 +55,19 @@ export function DoiImport() {
         disabled={loading}
         className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
       />
-      <button type="button" onClick={() => void submit()} disabled={loading || !doi.trim()} className="w-full rounded bg-emerald-700 py-1.5 text-sm text-white">
+      <button
+        type="button"
+        onClick={() => void submit()}
+        disabled={loading || !doi.trim()}
+        className="w-full rounded bg-emerald-700 py-1.5 text-sm text-white"
+      >
         {loading ? "Looking up…" : "Import from Crossref"}
       </button>
-      {message && <p role={phase === "success" ? "status" : "alert"} className="text-xs">{message}</p>}
+      {message && (
+        <p role={phase === "success" ? "status" : "alert"} className="text-xs">
+          {message}
+        </p>
+      )}
     </div>
   );
 }

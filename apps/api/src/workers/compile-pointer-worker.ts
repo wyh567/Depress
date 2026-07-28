@@ -19,20 +19,31 @@ import type { ArtifactUploader } from "./compile-processor";
 export type CompilePointerWorkerHandle = { close(): Promise<void> };
 
 interface PointerWorkerOptions {
-  connection: { host: string; port: number };
+  connection: {
+    host: string;
+    port: number;
+    username?: string;
+    password?: string;
+    db?: number;
+    tls?: Record<string, never>;
+  };
   lockDuration: number;
   maxStalledCount: number;
+  concurrency: number;
 }
 
 export type CompilePointerWorkerFactory = (
   queueName: string,
   processor: (job: { id?: string; data: unknown }) => Promise<unknown>,
-  options: PointerWorkerOptions,
+  options: PointerWorkerOptions
 ) => CompilePointerWorkerHandle;
 
 export async function startCompilePointerWorker(options: {
-  connection: { host: string; port: number };
+  connection: PointerWorkerOptions["connection"];
   pool: Pool;
+  concurrency?: number;
+  typstImage?: string;
+  typstFontDirectory?: string;
   repository?: CompileExecutionRepository;
   sandbox?: TypstSandboxRunner;
   artifacts?: ArtifactUploader;
@@ -40,17 +51,16 @@ export async function startCompilePointerWorker(options: {
   reconcileStaleContainers?: () => Promise<TypstSandboxReconciliationResult>;
   createWorker?: CompilePointerWorkerFactory;
 }): Promise<CompilePointerWorkerHandle> {
-  await (
-    options.reconcileStaleContainers ??
-    (() => reconcileStaleTypstSandboxContainers())
-  )();
+  await (options.reconcileStaleContainers ?? (() => reconcileStaleTypstSandboxContainers()))();
 
-  const repository =
-    options.repository ?? createCompileExecutionRepository(options.pool);
-  const sandbox = options.sandbox ?? createTypstSandboxRunner();
-  const artifacts =
-    options.artifacts ??
-    (await import("../services/s3")).createS3ArtifactService();
+  const repository = options.repository ?? createCompileExecutionRepository(options.pool);
+  const sandbox =
+    options.sandbox ??
+    createTypstSandboxRunner({
+      ...(options.typstImage ? { image: options.typstImage } : {}),
+      ...(options.typstFontDirectory ? { fontDirectory: options.typstFontDirectory } : {}),
+    });
+  const artifacts = options.artifacts ?? (await import("../services/s3")).createS3ArtifactService();
 
   const processor = async (job: { id?: string; data: unknown }) => {
     const outcome = await processCompilePointer(job.data, {
@@ -68,14 +78,11 @@ export async function startCompilePointerWorker(options: {
     connection: options.connection,
     lockDuration: PROCESSING_STALE_AFTER_MS,
     maxStalledCount: 2,
+    concurrency: options.concurrency ?? 1,
   };
 
   if (options.createWorker) {
-    return options.createWorker(
-      COMPILE_POINTER_QUEUE_NAME,
-      processor,
-      workerOptions,
-    );
+    return options.createWorker(COMPILE_POINTER_QUEUE_NAME, processor, workerOptions);
   }
 
   const { Worker } = await import("bullmq");
