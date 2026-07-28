@@ -1,0 +1,35 @@
+[Unit]
+Description=DePress persisted compile pointer worker
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=depress-worker
+Group=depress-runtime
+SupplementaryGroups=docker
+WorkingDirectory=/opt/depress/current
+EnvironmentFile=/etc/depress/pointer-worker.env
+RuntimeDirectory=depress-worker
+RuntimeDirectoryMode=0700
+Environment=TMPDIR=/run/depress-worker
+ExecStart=/usr/bin/corepack pnpm --dir /opt/depress/current --filter @depress/api start:pointer-worker
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=45s
+NoNewPrivileges=true
+# The host Docker daemon must see the same TMPDIR paths passed to sandbox mounts.
+PrivateTmp=false
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/opt/depress
+ReadWritePaths=/run/depress-worker
+
+[Install]
+WantedBy=multi-user.target

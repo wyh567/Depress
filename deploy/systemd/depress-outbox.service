@@ -1,0 +1,29 @@
+[Unit]
+Description=DePress compile outbox publisher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=depress-outbox
+Group=depress-runtime
+WorkingDirectory=/opt/depress/current
+EnvironmentFile=/etc/depress/outbox.env
+ExecStart=/usr/bin/corepack pnpm --dir /opt/depress/current --filter @depress/api start:outbox
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/opt/depress
+
+[Install]
+WantedBy=multi-user.target
