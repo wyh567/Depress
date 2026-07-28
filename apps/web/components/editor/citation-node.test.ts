@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
-import { Editor } from "@tiptap/core";
-import { parseDoc } from "@depress/ast";
+import { Editor, type JSONContent } from "@tiptap/core";
+import {
+  parseDoc,
+  PersistedDocumentEnvelopeSchema,
+  type PersistedDocumentEnvelope,
+} from "@depress/ast";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDepressExtensions } from "./extensions";
 import { pmDocToAst } from "./pm-doc-to-ast";
@@ -57,6 +61,43 @@ describe("citation 插入 → 序列化 → AST 校验", () => {
     expect(para.content).toHaveLength(5);
     expect(para.content[1]).toEqual({ type: "citation", citeKey: "wang2023" });
     expect(para.content[3]).toEqual({ type: "citation", citeKey: "smith2024" });
+  });
+
+  it("hydrates a persisted A, B, A sequence into the editable PM document unchanged", () => {
+    const envelope: PersistedDocumentEnvelope = {
+      schemaVersion: 1,
+      editor: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "citation", attrs: { citeKey: "A" } },
+              { type: "citation", attrs: { citeKey: "B" } },
+              { type: "citation", attrs: { citeKey: "A" } },
+            ],
+          },
+        ],
+      },
+      metadata: {},
+    };
+
+    editor.commands.setContent(envelope.editor as JSONContent);
+    const reopenedEnvelope = PersistedDocumentEnvelopeSchema.parse({
+      ...envelope,
+      editor: editor.getJSON(),
+    });
+    const paragraph = reopenedEnvelope.editor.content[0];
+    if (paragraph?.type !== "paragraph") throw new Error("expected paragraph");
+    const citationNodes = paragraph.content?.filter((node) => node.type === "citation") ?? [];
+
+    expect(citationNodes).toEqual([
+      { type: "citation", attrs: { citeKey: "A" } },
+      { type: "citation", attrs: { citeKey: "B" } },
+      { type: "citation", attrs: { citeKey: "A" } },
+    ]);
+    expect(citationNodes.map((node) => node.attrs.citeKey)).toEqual(["A", "B", "A"]);
+    expect(editor.isEditable).toBe(true);
   });
 });
 

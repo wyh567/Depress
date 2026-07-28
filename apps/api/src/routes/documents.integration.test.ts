@@ -60,6 +60,24 @@ const revisedEnvelope: PersistedDocumentEnvelope = {
   },
 };
 
+const repeatedCitationEnvelope: PersistedDocumentEnvelope = {
+  schemaVersion: 1,
+  editor: {
+    type: "doc",
+    content: [
+      {
+        type: "paragraph",
+        content: [
+          { type: "citation", attrs: { citeKey: "A" } },
+          { type: "citation", attrs: { citeKey: "B" } },
+          { type: "citation", attrs: { citeKey: "A" } },
+        ],
+      },
+    ],
+  },
+  metadata: {},
+};
+
 describeDatabase("authenticated document API", () => {
   let pool: Pool;
 
@@ -319,6 +337,49 @@ describeDatabase("authenticated document API", () => {
         revision: 2,
         envelope: revisedEnvelope,
       });
+    } finally {
+      await reconstructedApp.close();
+    }
+  });
+
+  it("preserves repeated citation order across save and reconstructed read", async () => {
+    const firstApp = createApp();
+    const cookie = await seedAndLogin(firstApp, MENTOR_A);
+    const created = await firstApp.inject({
+      method: "POST",
+      url: "/api/documents",
+      headers: { cookie },
+      payload: {},
+    });
+    const documentId = created.json().id as string;
+    const saved = await firstApp.inject({
+      method: "PUT",
+      url: `/api/documents/${documentId}`,
+      headers: { cookie },
+      payload: { expectedRevision: 1, envelope: repeatedCitationEnvelope },
+    });
+    expect(saved.statusCode).toBe(200);
+    await firstApp.close();
+
+    const reconstructedApp = createApp();
+    try {
+      const reopened = await reconstructedApp.inject({
+        method: "GET",
+        url: `/api/documents/${documentId}`,
+        headers: { cookie },
+      });
+      expect(reopened.statusCode).toBe(200);
+      const envelope = PersistedDocumentEnvelopeSchema.parse(reopened.json().envelope);
+      const paragraph = envelope.editor.content[0];
+      if (paragraph?.type !== "paragraph") throw new Error("Expected a paragraph");
+      const citationNodes = paragraph.content?.filter((node) => node.type === "citation") ?? [];
+
+      expect(citationNodes).toEqual([
+        { type: "citation", attrs: { citeKey: "A" } },
+        { type: "citation", attrs: { citeKey: "B" } },
+        { type: "citation", attrs: { citeKey: "A" } },
+      ]);
+      expect(citationNodes.map((node) => node.attrs.citeKey)).toEqual(["A", "B", "A"]);
     } finally {
       await reconstructedApp.close();
     }
