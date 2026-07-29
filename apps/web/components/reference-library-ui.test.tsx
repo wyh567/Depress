@@ -54,6 +54,14 @@ describe("persisted reference library UI", () => {
     expect(confirm).toHaveBeenCalledWith("smith2024");
   });
 
+  it("hides DOI import while keeping BibTeX and manual entry available", () => {
+    render(<LibraryPanel />);
+    expect(screen.queryByLabelText("DOI")).not.toBeInTheDocument();
+    expect(screen.queryByText("Import by DOI")).not.toBeInTheDocument();
+    expect(screen.getByText("Import BibTeX")).toBeInTheDocument();
+    expect(screen.getByLabelText("citeKey")).toBeInTheDocument();
+  });
+
   it("updates through the server and retains the same citeKey identity", async () => {
     render(<LibraryPanel />);
     fireEvent.click(screen.getByRole("button", { name: "Edit smith2024" }));

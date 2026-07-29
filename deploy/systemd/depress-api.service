@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=depress-api
-Group=depress-runtime
+Group=depress-api
 WorkingDirectory=/opt/depress/current
 EnvironmentFile=/etc/depress/api.env
 ExecStart=/usr/bin/corepack pnpm --dir /opt/depress/current --filter @depress/api start:api

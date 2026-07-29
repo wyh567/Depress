@@ -2,9 +2,11 @@
 
 This package targets a Vercel-compatible Next.js Web and one private Linux VM.
 The VM runs three distinct systemd identities: `depress-api`,
-`depress-outbox`, and `depress-worker`. Only `depress-worker` belongs to the
-host `docker` group. PostgreSQL, Redis, S3-compatible storage, and the Docker
-socket must not listen on a public interface.
+`depress-outbox`, and `depress-worker`, each with a matching private primary
+group. A fourth non-login identity, `depress-migration`, runs only explicit
+migrations. Only `depress-worker` belongs to the host `docker` group.
+PostgreSQL, Redis, S3-compatible storage, and the Docker socket must not listen
+on a public interface.
 
 ## Runtime commands
 
@@ -49,23 +51,59 @@ cannot change either identity.
 
 ## First installation and release
 
-1. Install Node 22+, Corepack, pnpm 9, Git, rsync, nginx, Docker, and systemd.
-2. Create `depress-api`, `depress-outbox`, `depress-worker` users and the
-   `depress-runtime` group. Add only `depress-worker` to `docker`.
+1. Install Node 22+, Corepack, pnpm 9, Git, tar, nginx, Docker, and systemd.
+2. Create `depress-api`, `depress-outbox`, `depress-worker`, and
+   `depress-migration` as non-login system users. Give each identity a matching
+   private primary group (`depress-api`, `depress-outbox`, `depress-worker`,
+   `depress-migration`). Add only `depress-worker` to `docker`; do not add the
+   API, outbox, or migration identities to that group. On a new host,
+   `useradd --system --user-group --no-create-home --shell /usr/sbin/nologin
+   <name>` creates the required private group and user together.
 3. Install the unit templates and nginx template as root. Provision TLS files
    outside the repository at `/etc/depress/tls/`.
 4. Create the four process-specific `/etc/depress/*.env` files from the
-   example. Set owner `root:depress-runtime`, mode `0640`.
+   example. Apply these exact owners and modes:
+
+   | File | Owner | Mode |
+   | ---- | ----- | ---- |
+   | `/etc/depress/api.env` | `root:depress-api` | `0640` |
+   | `/etc/depress/outbox.env` | `root:depress-outbox` | `0640` |
+   | `/etc/depress/pointer-worker.env` | `root:depress-worker` | `0640` |
+   | `/etc/depress/migration.env` | `root:depress-migration` | `0640` |
+
+   The private groups are an access boundary: never add another runtime
+   identity to them. The root-started migration script drops privileges first;
+   only then does `depress-migration` read its root-owned, non-writable file.
+   That file must contain exactly one non-empty `DATABASE_URL=...` line.
 5. From a clean checkout of the exact commit, run
    `sudo DEPRESS_API_ORIGIN=https://<api-origin> bash deploy/release.sh "$PWD" "$(git rev-parse HEAD)"`.
 6. Run `sudo bash deploy/migrate.sh` explicitly, then
    `bash deploy/health-check.sh`.
    Migrations are idempotent and are never coupled to API boot.
 
+Before enabling or restarting services, run
+`sudo bash deploy/verify-env-permissions.sh`. It verifies ownership, modes,
+cross-service denial, the migration boundary, and that Docker membership is
+limited to the Worker. It never prints environment-file contents.
+The core read checks are equivalent to:
+
+```bash
+sudo -u depress-api test -r /etc/depress/api.env
+sudo -u depress-api test ! -r /etc/depress/pointer-worker.env
+sudo -u depress-worker test -r /etc/depress/pointer-worker.env
+sudo -u depress-worker test ! -r /etc/depress/api.env
+sudo -u depress-outbox test -r /etc/depress/outbox.env
+sudo -u depress-outbox test ! -r /etc/depress/api.env
+sudo -u depress-migration test -r /etc/depress/migration.env
+```
+
 Releases are immutable, root-owned directories at
 `/opt/depress/releases/<commit-sha>`. `/opt/depress/current` is an atomic
 symlink; `/opt/depress/previous` records the prior target. Runtime identities
-have no write path under `/opt/depress`.
+have no write path under `/opt/depress`. `release.sh` rejects any staged,
+modified, or untracked source file, then builds from `git archive` of the exact
+40-character HEAD commit. Ignored local files and build outputs therefore
+cannot enter a release.
 
 ## Restart, rollback, and recovery
 

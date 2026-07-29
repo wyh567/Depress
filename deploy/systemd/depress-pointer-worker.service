@@ -6,7 +6,7 @@ Requires=docker.service
 [Service]
 Type=simple
 User=depress-worker
-Group=depress-runtime
+Group=depress-worker
 SupplementaryGroups=docker
 WorkingDirectory=/opt/depress/current
 EnvironmentFile=/etc/depress/pointer-worker.env

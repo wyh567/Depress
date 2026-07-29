@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useReferenceLibrary } from "@/stores/reference-library";
 import { AddReferenceForm } from "./add-reference-form";
 import { BibtexImport } from "./bibtex-import";
-import { DoiImport } from "./doi-import";
 import { formatAuthors, formatYear } from "./format-reference";
 
 export function LibraryPanel({
@@ -37,7 +36,6 @@ export function LibraryPanel({
     <aside className="flex min-h-0 flex-col border-l border-gray-200 bg-gray-50">
       <h2 className="border-b border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700">Reference library</h2>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <DoiImport />
         <BibtexImport />
         <AddReferenceForm />
         {loading && <p role="status" className="px-3 py-2 text-sm">Loading references…</p>}
