@@ -11,13 +11,18 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { basename, join } from "node:path";
 
-const EXACT_COMMIT = "8a83cfd9dee844efc4473b05a3547edf860f1ccb";
+const EXACT_COMMIT = requiredEnv("DAY10_CANDIDATE_SHA");
 const externalRoot = "D:\\depress-day10-wsl";
 const artifactDir = join(externalRoot, "artifacts");
 const testMode = process.env.DAY10_MODE ?? "full";
-const runsCoreAcceptance = ["diagnose", "focused", "d10-010", "remaining", "full"].includes(
-  testMode
-);
+const runsCoreAcceptance = [
+  "diagnose",
+  "focused",
+  "d10-010",
+  "remaining",
+  "smoke",
+  "full",
+].includes(testMode);
 const resultFile = join(
   externalRoot,
   testMode === "preflight"
@@ -30,9 +35,35 @@ const resultFile = join(
           ? "d10-010-results.json"
           : testMode === "remaining"
             ? "remaining-results.json"
-            : "acceptance-results.json"
+            : testMode === "smoke"
+              ? "smoke-results.json"
+              : "acceptance-results.json"
 );
 const controlScript = "/mnt/d/depress/e2e/day10/staging-control.sh";
+const IEEE_HEADING_PREFIX = "I)";
+
+function normalizeSemanticHeading(value: string): string {
+  return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en-US");
+}
+
+function extractIeeeSectionHeading(pdfText: string): string {
+  const headingLine = pdfText.split(/\r?\n/u).find((line) => {
+    const trimmed = line.trimStart();
+    return trimmed.startsWith(`${IEEE_HEADING_PREFIX} `);
+  });
+  if (!headingLine) {
+    throw new Error(
+      `PDF text did not contain an IEEE section line beginning with ${IEEE_HEADING_PREFIX}`
+    );
+  }
+  return headingLine.trimStart().slice(IEEE_HEADING_PREFIX.length).trimStart();
+}
+
+function expectIeeeSectionHeading(pdfText: string, expectedHeading: string): void {
+  expect(normalizeSemanticHeading(extractIeeeSectionHeading(pdfText))).toBe(
+    normalizeSemanticHeading(expectedHeading)
+  );
+}
 
 const mentorA = {
   email: requiredEnv("DAY10_MENTOR_A_EMAIL"),
@@ -577,6 +608,7 @@ async function waitForCompileStatus(page: Page, status: string): Promise<void> {
 
 interface CompileOptions {
   duplicateClick?: boolean;
+  openPdfInBrowser?: boolean;
   pauseWorker?: boolean;
   expectSuccess?: boolean;
   savePdf?: boolean;
@@ -591,6 +623,7 @@ async function compileRevision(
   resource: Record<string, unknown>;
   pdfPath?: string;
   pdfText?: string;
+  viewerOpened?: boolean;
 }> {
   const pauseWorker = options.pauseWorker ?? true;
   const expectSuccess = options.expectSuccess ?? true;
@@ -634,14 +667,18 @@ async function compileRevision(
   await waitForCompileStatus(page, "accepted");
 
   if (options.duplicateClick) {
-    await page.waitForTimeout(500);
-    expect(createResponses).toHaveLength(1);
-    expect(control("duplicate-near-count", jobId)).toBe("1");
+    await waitForCompileStatus(page, "queued");
   }
 
   if (pauseWorker) {
-    await waitForCompileStatus(page, "queued");
+    if (!options.duplicateClick) {
+      await waitForCompileStatus(page, "queued");
+    }
     transitions.push("queued");
+    if (options.duplicateClick) {
+      expect(createResponses).toHaveLength(1);
+      expect(control("duplicate-near-count", jobId)).toBe("1");
+    }
     control("resume-worker");
   }
 
@@ -682,9 +719,49 @@ async function compileRevision(
   );
 
   if (!savePdf) return { jobId, resource };
-  const pdfResponse = await page.request.get(signedUrl);
-  expect(pdfResponse.status()).toBe(200);
-  const body = await pdfResponse.body();
+  let viewerOpened = false;
+  let body: Buffer;
+  if (options.openPdfInBrowser) {
+    const pdfResponse = await page.request.get(signedUrl);
+    expect(pdfResponse.status()).toBe(200);
+    expect(pdfResponse.headers()["content-type"]).toContain("application/pdf");
+    body = await pdfResponse.body();
+    const pdfViewer = await page.context().newPage();
+    try {
+      await pdfViewer.setContent(`
+        <!doctype html>
+        <html>
+          <head><title>Day 10 PDF Viewer</title></head>
+          <body style="margin: 0">
+            <embed id="pdf-viewer" type="application/pdf" style="width: 100vw; height: 100vh">
+          </body>
+        </html>
+      `);
+      await pdfViewer.evaluate((base64Pdf) => {
+        const binary = atob(base64Pdf);
+        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+        const pdfUrl = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+        const viewer = document.querySelector<HTMLEmbedElement>("#pdf-viewer");
+        if (!viewer) throw new Error("PDF viewer element was not created");
+        viewer.src = pdfUrl;
+      }, body.toString("base64"));
+      await expect(pdfViewer.locator("#pdf-viewer")).toBeVisible();
+      await expect(pdfViewer.locator("#pdf-viewer")).toHaveAttribute("src", /^blob:/u);
+      expect(await pdfViewer.title()).toBe("Day 10 PDF Viewer");
+      viewerOpened = true;
+      evidence.observations.pdfViewer = {
+        opened: true,
+        title: await pdfViewer.title(),
+        contentType: pdfResponse.headers()["content-type"],
+      };
+    } finally {
+      await pdfViewer.close();
+    }
+  } else {
+    const pdfResponse = await page.request.get(signedUrl);
+    expect(pdfResponse.status()).toBe(200);
+    body = await pdfResponse.body();
+  }
   expect(body.subarray(0, 5).toString("ascii")).toBe("%PDF-");
   expect(body.byteLength).toBeGreaterThan(1_500);
   mkdirSync(artifactDir, { recursive: true });
@@ -705,7 +782,7 @@ async function compileRevision(
     transitions,
   });
   persistEvidence();
-  return { jobId, resource, pdfPath, pdfText };
+  return { jobId, resource, pdfPath, pdfText, viewerOpened };
 }
 
 async function waitForDbTerminal(jobId: string): Promise<string> {
@@ -724,6 +801,17 @@ test.afterEach(() => {
     // The worker may be stopped or already cleaned up after the one bounded run.
   }
   persistEvidence();
+});
+
+test("Day 10 IEEE heading semantic normalization is exact", () => {
+  const expectedHeading = "Acceptance Findings";
+
+  expectIeeeSectionHeading("I) ACCEPTANCE FINDINGS", expectedHeading);
+  expect(normalizeSemanticHeading("  Acceptance\u00a0Findings  ")).toBe(
+    normalizeSemanticHeading("ACCEPTANCE FINDINGS")
+  );
+  expect(() => expectIeeeSectionHeading("I) Unrelated Findings", expectedHeading)).toThrow();
+  expect(() => expectIeeeSectionHeading("ACCEPTANCE FINDINGS", expectedHeading)).toThrow();
 });
 
 test.describe("Day 10 signup/auth preflight", () => {
@@ -988,14 +1076,14 @@ test.describe.serial("Day 10 citation stability gate", () => {
 test.describe("Day 10 full technical acceptance", () => {
   test.skip(
     !runsCoreAcceptance,
-    "Core acceptance runs only in diagnose, focused, D10-010, remaining, or full mode."
+    "Core acceptance runs only in diagnose, focused, D10-010, remaining, smoke, or full mode."
   );
 
   test("authenticated browser-to-PDF technical acceptance", async ({ browser }) => {
     if (!mentorAStorageState) {
       mentorAStorageState = await captureAuthenticatedState(browser, mentorA);
     }
-    if (testMode !== "d10-010" && !mentorBStorageState) {
+    if (!["d10-010", "smoke"].includes(testMode) && !mentorBStorageState) {
       mentorBStorageState = await captureAuthenticatedState(browser, mentorB);
     }
     const mentorAContext = await newDay10Context(
@@ -1054,6 +1142,10 @@ test.describe("Day 10 full technical acceptance", () => {
           expect(evidence.topology).toContain("depress-api.service");
           expect(evidence.topology).toContain("depress-outbox.service");
           expect(evidence.topology).toContain("depress-pointer-worker.service");
+          if (testMode === "smoke") {
+            expect(evidence.topology).toMatch(/depress-outbox\.service .* active running/u);
+            expect(evidence.topology).toMatch(/depress-pointer-worker\.service .* active running/u);
+          }
         });
 
         await acceptanceCase(
@@ -1194,26 +1286,87 @@ test.describe("Day 10 full technical acceptance", () => {
           }
         );
 
-        if (!["diagnose", "focused", "full"].includes(testMode)) return;
+        if (!["diagnose", "focused", "smoke", "full"].includes(testMode)) return;
 
-        await acceptanceCase("D10-004", "dirty save gate and duplicate-click guard", async () => {
-          const editor = page.locator(".ProseMirror");
-          await editor.click();
-          await editor.press("End");
-          await editor.type(" Dirty gate edit.");
-          await expect(page.getByText("Save the document before compiling")).toBeVisible();
-          await expect(page.getByRole("button", { name: "Compile", exact: true })).toBeDisabled();
-          const saved = await saveDocument(page);
-          primaryRevision = saved.revision;
-          await expect(page.getByRole("button", { name: "Compile", exact: true })).toBeEnabled();
-        });
+        if (testMode !== "smoke") {
+          await acceptanceCase("D10-004", "dirty save gate and duplicate-click guard", async () => {
+            const editor = page.locator(".ProseMirror");
+            await editor.click();
+            await editor.press("End");
+            await editor.type(" Dirty gate edit.");
+            await expect(page.getByText("Save the document before compiling")).toBeVisible();
+            await expect(page.getByRole("button", { name: "Compile", exact: true })).toBeDisabled();
+            const saved = await saveDocument(page);
+            primaryRevision = saved.revision;
+            await expect(page.getByRole("button", { name: "Compile", exact: true })).toBeEnabled();
+          });
+        }
 
         let ieeeText = "";
         await acceptanceCase("D10-005", "IEEE compile and authenticated PDF download", async () => {
-          const compiled = await compileRevision(page, "ieee", { duplicateClick: true });
+          const compiled = await compileRevision(
+            page,
+            "ieee",
+            testMode === "smoke" ? { openPdfInBrowser: true } : { duplicateClick: true }
+          );
           ieeeJobId = compiled.jobId;
           ieeeText = compiled.pdfText ?? "";
+          if (testMode === "smoke") {
+            const normalized = ieeeText.replace(/\s+/gu, " ");
+            expect(compiled.viewerOpened).toBe(true);
+            expect(normalized).toContain("Day 10 Mentor Acceptance Manuscript");
+            expectIeeeSectionHeading(ieeeText, "Acceptance Findings");
+            expect(normalized).toContain("A second persisted body paragraph.");
+            expect(/\[1\].*?\[2\].*?\[1\]/u.test(normalized)).toBe(true);
+            expect(normalized).toMatch(/References/iu);
+            expect(normalized.match(/Day 10 Reference Alpha/gu) ?? []).toHaveLength(1);
+            expect(normalized.match(/Day 10 Reference Beta/gu) ?? []).toHaveLength(1);
+            expect(normalized).not.toContain("Day 10 Unused Reference");
+          }
         });
+
+        if (testMode === "smoke") {
+          await acceptanceCase(
+            "D10-SMOKE-LOGOUT",
+            "logout clears the disposable session",
+            async () => {
+              await page.getByRole("button", { name: "Sign out" }).click();
+              await expect(page.getByRole("heading", { name: "Mentor sign in" })).toBeVisible();
+              await expect(page.getByText(/Compile status:/u)).toHaveCount(0);
+              await expect(page.getByRole("button", { name: "Download PDF" })).toHaveCount(0);
+              const clientState = await page.evaluate(() =>
+                JSON.stringify({
+                  localStorage: { ...window.localStorage },
+                  sessionStorage: { ...window.sessionStorage },
+                })
+              );
+              expect(clientState).not.toContain(ieeeJobId);
+              const sessionCookies = (await mentorAContext.cookies()).filter((cookie) =>
+                cookie.name.includes("session")
+              );
+              evidence.observations.logout = {
+                compileStatusCount: await page.getByText(/Compile status:/u).count(),
+                downloadButtonCount: await page
+                  .getByRole("button", { name: "Download PDF" })
+                  .count(),
+                sessionCookieCount: sessionCookies.length,
+              };
+              expect(evidence.observations.logout).toEqual({
+                compileStatusCount: 0,
+                downloadButtonCount: 0,
+                sessionCookieCount: 0,
+              });
+              expect(sessionCookies).toHaveLength(0);
+              expect(evidence.requestCounts).toEqual({
+                signIn: 1,
+                signUp: 0,
+                documentSave: 1,
+              });
+              expect(evidence.retries).toBe(0);
+            }
+          );
+          return;
+        }
 
         if (testMode === "diagnose") return;
 

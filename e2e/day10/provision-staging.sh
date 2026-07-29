@@ -25,7 +25,7 @@ provision_day10_staging() {
   worker_secret_key="$(openssl rand -hex 24)"
   mentor_a_password="$(openssl rand -hex 24)"
   mentor_b_password="$(openssl rand -hex 24)"
-  database_url="postgresql://depress_day10:${day10_database_password}@127.0.0.1:5432/depress_day10"
+  database_url="postgresql://depress_day10:${day10_database_password}@127.0.0.1:${postgres_port}/depress_day10"
 
   printf '%s\n' \
     "NODE_ENV=production" \
@@ -233,8 +233,8 @@ UNIT
   cat > /etc/systemd/system/depress-api.service <<'UNIT'
 [Unit]
 Description=DePress Day 10 authenticated API
-After=network.target postgresql@16-main.service depress-redis-day10.service depress-minio-day10.service
-Requires=postgresql@16-main.service depress-redis-day10.service depress-minio-day10.service
+After=network.target depress-redis-day10.service depress-minio-day10.service
+Requires=depress-redis-day10.service depress-minio-day10.service
 [Service]
 Type=simple
 User=depress-api
@@ -261,8 +261,8 @@ UNIT
   cat > /etc/systemd/system/depress-outbox.service <<'UNIT'
 [Unit]
 Description=DePress Day 10 compile outbox publisher
-After=network.target postgresql@16-main.service depress-redis-day10.service
-Requires=postgresql@16-main.service depress-redis-day10.service
+After=network.target depress-redis-day10.service
+Requires=depress-redis-day10.service
 [Service]
 Type=simple
 User=depress-outbox
@@ -289,8 +289,8 @@ UNIT
   cat > /etc/systemd/system/depress-pointer-worker.service <<'UNIT'
 [Unit]
 Description=DePress Day 10 persisted compile pointer worker
-After=network.target postgresql@16-main.service depress-redis-day10.service depress-minio-day10.service
-Requires=postgresql@16-main.service depress-redis-day10.service depress-minio-day10.service
+After=network.target depress-redis-day10.service depress-minio-day10.service
+Requires=depress-redis-day10.service depress-minio-day10.service
 [Service]
 Type=simple
 User=depress-worker

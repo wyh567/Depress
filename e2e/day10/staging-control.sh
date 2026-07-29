@@ -183,11 +183,11 @@ case "$command_name" in
   topology)
     echo "release=$(cat /opt/depress/current/.depress-release)"
     for unit in depress-web-day10.service depress-api.service depress-outbox.service depress-pointer-worker.service; do
-      systemctl show "$unit" -p Id -p User -p Group -p MainPID -p ExecStart --value |
+      systemctl show "$unit" -p Id -p ActiveState -p SubState -p User -p Group -p MainPID -p ExecStart --value |
         tr '\n' ' ' | sed "s/^/$unit /"
       echo
     done
-    ss -lntp | awk 'NR == 1 || /:5432 |:16379 |:18443 |:19000 |:19001 /'
+    ss -lntp | awk 'NR == 1 || /:15432 |:16379 |:18443 |:19000 |:19001 /'
     ;;
   separation)
     if runuser -u depress-api -- docker info >/dev/null 2>&1; then
@@ -206,7 +206,7 @@ case "$command_name" in
     echo "api-docker=denied worker-docker=allowed worker-write=/run/depress-worker-only"
     ;;
   network-boundaries)
-    for port in 5432 16379 19000 19001; do
+    for port in 15432 16379 19000 19001; do
       if ss -H -lnt "sport = :${port}" |
         awk '$4 !~ /^127\.0\.0\.1:/ && $4 !~ /^\[::1\]:/ { found=1 } END { exit !found }'; then
         echo "unexpected-public-listener=${port}" >&2
