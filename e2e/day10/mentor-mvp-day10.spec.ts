@@ -11,6 +11,14 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { basename, join } from "node:path";
 
+import {
+  createCompileStatusObservation,
+  observeCompileUiStatus,
+  parseCompileUiStatus,
+  validateSuccessfulCompileObservation,
+  type CompileStatusObservation,
+} from "./compile-status-observation";
+
 const EXACT_COMMIT = requiredEnv("DAY10_CANDIDATE_SHA");
 const externalRoot = "D:\\depress-day10-wsl";
 const artifactDir = join(externalRoot, "artifacts");
@@ -100,7 +108,7 @@ interface PdfEvidence {
   bytes: number;
   sha256: string;
   pages: number;
-  transitions: string[];
+  uiObservedStatuses: string[];
 }
 
 interface CitationEvidence {
@@ -136,6 +144,7 @@ const evidence: {
   exactCommit: string;
   cases: CaseResult[];
   pdfs: PdfEvidence[];
+  compileStatusObservations: CompileStatusObservation[];
   topology?: string;
   separation?: string;
   workerPostJob?: string;
@@ -150,6 +159,7 @@ const evidence: {
   exactCommit: EXACT_COMMIT,
   cases: [],
   pdfs: [],
+  compileStatusObservations: [],
   legacyCompileCalls: 0,
   citation: {
     intended: ["A", "B", "A"],
@@ -606,6 +616,30 @@ async function waitForCompileStatus(page: Page, status: string): Promise<void> {
   ).toBeVisible({ timeout: 90_000 });
 }
 
+async function waitForSuccessfulCompileTerminal(
+  page: Page,
+  observation: CompileStatusObservation
+): Promise<void> {
+  const compileStatus = page.getByRole("status").filter({ hasText: "Compile status:" });
+  await expect
+    .poll(
+      async () => {
+        const status = parseCompileUiStatus(await compileStatus.textContent());
+        if (!status) return undefined;
+        observeCompileUiStatus(observation, status);
+        if (status === "failed") {
+          throw new Error("compile UI reached failed while success was required");
+        }
+        return status;
+      },
+      {
+        message: "compile UI must reach succeeded; processing may be shorter than one UI poll",
+        timeout: 90_000,
+      }
+    )
+    .toBe("succeeded");
+}
+
 interface CompileOptions {
   duplicateClick?: boolean;
   openPdfInBrowser?: boolean;
@@ -628,7 +662,6 @@ async function compileRevision(
   const pauseWorker = options.pauseWorker ?? true;
   const expectSuccess = options.expectSuccess ?? true;
   const savePdf = options.savePdf ?? expectSuccess;
-  const transitions: string[] = [];
   if (pauseWorker) {
     control("pause-worker");
   }
@@ -662,9 +695,13 @@ async function compileRevision(
   expect(createdResponse.status()).toBe(202);
   const resource = (await createdResponse.json()) as Record<string, unknown>;
   const jobId = String(resource.jobId);
+  expect(jobId).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+  );
+  const statusObservation = createCompileStatusObservation(jobId, template);
   expect(resource.status).toBe("accepted");
-  transitions.push("accepted");
   await waitForCompileStatus(page, "accepted");
+  observeCompileUiStatus(statusObservation, "accepted");
 
   if (options.duplicateClick) {
     await waitForCompileStatus(page, "queued");
@@ -674,7 +711,7 @@ async function compileRevision(
     if (!options.duplicateClick) {
       await waitForCompileStatus(page, "queued");
     }
-    transitions.push("queued");
+    observeCompileUiStatus(statusObservation, "queued");
     if (options.duplicateClick) {
       expect(createResponses).toHaveLength(1);
       expect(control("duplicate-near-count", jobId)).toBe("1");
@@ -684,15 +721,30 @@ async function compileRevision(
 
   if (!expectSuccess) {
     await waitForCompileStatus(page, "failed");
-    transitions.push("failed");
+    observeCompileUiStatus(statusObservation, "failed");
+    const failedJobResponse = await page.request.get(`/api/compile-jobs/${jobId}`);
+    expect(failedJobResponse.status()).toBe(200);
+    const failedJob = (await failedJobResponse.json()) as Record<string, unknown>;
+    expect(failedJob.jobId).toBe(jobId);
+    expect(failedJob.documentId).toBe(resource.documentId);
+    expect(failedJob.revision).toBe(resource.revision);
+    expect(failedJob.status).toBe("failed");
+    statusObservation.apiTerminalStatus = "failed";
+    evidence.compileStatusObservations.push(statusObservation);
+    persistEvidence();
+    await expect(page.getByRole("button", { name: "Download PDF" })).toHaveCount(0);
     page.off("response", responseListener);
     return { jobId, resource };
   }
 
-  await waitForCompileStatus(page, "processing");
-  transitions.push("processing");
-  await waitForCompileStatus(page, "succeeded");
-  transitions.push("succeeded");
+  try {
+    await waitForSuccessfulCompileTerminal(page, statusObservation);
+  } catch (error) {
+    evidence.compileStatusObservations.push(statusObservation);
+    persistEvidence();
+    page.off("response", responseListener);
+    throw error;
+  }
   await expect(page.getByRole("button", { name: "Download PDF" })).toBeVisible();
   page.off("response", responseListener);
 
@@ -700,6 +752,10 @@ async function compileRevision(
   expect(jobResponse.status()).toBe(200);
   const jobJson = (await jobResponse.json()) as Record<string, unknown>;
   expect(Object.keys(jobJson).sort()).toEqual(Object.keys(resource).sort());
+  expect(jobJson.jobId).toBe(jobId);
+  expect(jobJson.documentId).toBe(resource.documentId);
+  expect(jobJson.revision).toBe(resource.revision);
+  expect(jobJson.status).toBe("succeeded");
   expect(JSON.stringify(jobJson)).not.toContain("artifactKey");
   expect(JSON.stringify(jobJson)).not.toContain("artifacts/");
 
@@ -710,6 +766,19 @@ async function compileRevision(
   const signedUrl = String(downloadJson.downloadUrl);
   const parsedUrl = new URL(signedUrl);
   expect(Number(parsedUrl.searchParams.get("X-Amz-Expires"))).toBeLessThanOrEqual(900);
+  validateSuccessfulCompileObservation(statusObservation, {
+    expectedJobId: jobId,
+    apiJobId: String(jobJson.jobId),
+    expectedDocumentId: resource.documentId,
+    apiDocumentId: jobJson.documentId,
+    expectedRevision: resource.revision,
+    apiRevision: jobJson.revision,
+    apiTerminalStatus: jobJson.status,
+    downloadAvailable: true,
+    timedOut: false,
+  });
+  evidence.compileStatusObservations.push(statusObservation);
+  persistEvidence();
 
   recordCheck(
     `D10-ARTIFACT-${template.toUpperCase()}`,
@@ -779,7 +848,7 @@ async function compileRevision(
     bytes: body.byteLength,
     sha256: createHash("sha256").update(body).digest("hex"),
     pages,
-    transitions,
+    uiObservedStatuses: [...statusObservation.uiObservedStatuses],
   });
   persistEvidence();
   return { jobId, resource, pdfPath, pdfText, viewerOpened };
