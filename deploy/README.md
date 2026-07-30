@@ -59,9 +59,29 @@ cannot change either identity.
    API, outbox, or migration identities to that group. On a new host,
    `useradd --system --user-group --no-create-home --shell /usr/sbin/nologin
    <name>` creates the required private group and user together.
-3. Install the unit templates and nginx template as root. Provision TLS files
-   outside the repository at `/etc/depress/tls/`.
-4. Create the four process-specific `/etc/depress/*.env` files from the
+3. Install the unit templates and nginx template as root. Create the
+   environment directory as a real root-owned directory, not a symlink:
+
+   ```bash
+   sudo test ! -L /etc/depress
+   sudo install -d -o root -g root -m 0711 /etc/depress
+   ```
+
+   Mode `0711` lets a service traverse a known environment-file path without
+   granting directory listing. The private group and `0640` mode on each file
+   remain the read boundary. Do not use `0750 root:root`: service identities
+   would be unable to traverse the directory and read even their own file.
+4. Provision TLS files outside the repository under a separate strict
+   subdirectory. The traversable environment directory does not relax private
+   key permissions:
+
+   ```bash
+   sudo test ! -L /etc/depress/tls
+   sudo install -d -o root -g root -m 0700 /etc/depress/tls
+   sudo chmod 0600 /etc/depress/tls/privkey.pem
+   ```
+
+5. Create the four process-specific `/etc/depress/*.env` files from the
    example. Apply these exact owners and modes:
 
    | File | Owner | Mode |
@@ -75,9 +95,9 @@ cannot change either identity.
    identity to them. The root-started migration script drops privileges first;
    only then does `depress-migration` read its root-owned, non-writable file.
    That file must contain exactly one non-empty `DATABASE_URL=...` line.
-5. From a clean checkout of the exact commit, run
+6. From a clean checkout of the exact commit, run
    `sudo DEPRESS_API_ORIGIN=https://<api-origin> bash deploy/release.sh "$PWD" "$(git rev-parse HEAD)"`.
-6. Run `sudo bash deploy/migrate.sh` explicitly, then
+7. Run `sudo bash deploy/migrate.sh` explicitly, then
    `bash deploy/health-check.sh`.
    Migrations are idempotent and are never coupled to API boot.
 

@@ -118,6 +118,49 @@ for forbidden in .env node_modules .next .turbo; do
 done
 pass "ignored environment and build outputs cannot enter archive"
 
+new_case archive-fidelity
+declare -a CRITICAL_SHELL_FILES=(
+  "deploy/release.sh"
+  "deploy/migrate.sh"
+  "deploy/verify-env-permissions.sh"
+  "e2e/day10/run-staging.sh"
+  "e2e/day10/provision-staging.sh"
+)
+SOURCE_REPO=$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel)
+for critical_path in "${CRITICAL_SHELL_FILES[@]}"; do
+  mkdir -p "${CASE_REPO}/$(dirname "${critical_path}")"
+  cp "${SOURCE_REPO}/${critical_path}" "${CASE_REPO}/${critical_path}"
+done
+git -C "${CASE_REPO}" add "${CRITICAL_SHELL_FILES[@]}"
+git -C "${CASE_REPO}" commit -qm "archive fidelity fixture"
+CASE_SHA=$(git -C "${CASE_REPO}" rev-parse HEAD)
+git -C "${CASE_REPO}" config core.autocrlf true
+mkdir -p \
+  "${CASE_REPO}/node_modules/local" \
+  "${CASE_REPO}/.next" \
+  "${CASE_REPO}/.turbo"
+printf '%s\n' "must-not-enter" > "${CASE_REPO}/.env"
+printf '%s\n' "ignored" > "${CASE_REPO}/node_modules/local/file"
+printf '%s\n' "ignored" > "${CASE_REPO}/.next/file"
+printf '%s\n' "ignored" > "${CASE_REPO}/.turbo/file"
+run_release >/dev/null
+for critical_path in "${CRITICAL_SHELL_FILES[@]}"; do
+  blob_file="${SANDBOX}/blob-$RANDOM"
+  git -C "${CASE_REPO}" cat-file blob \
+    "${CASE_SHA}:${critical_path}" > "$blob_file"
+  cmp -s \
+    "$blob_file" \
+    "${CASE_ROOT}/releases/${CASE_SHA}/${critical_path}" ||
+    fail "archive bytes differ from Git for a critical shell file"
+  bash -n "${CASE_ROOT}/releases/${CASE_SHA}/${critical_path}"
+  rm -f -- "$blob_file"
+done
+for forbidden in .git .env node_modules .next .turbo; do
+  [[ ! -e "${CASE_ROOT}/releases/${CASE_SHA}/${forbidden}" ]] ||
+    fail "forbidden ${forbidden} entered the byte-fidelity release"
+done
+pass "Git blobs and release archive shell files are byte-for-byte identical"
+
 new_case head-mismatch
 FIRST_SHA=${CASE_SHA}
 printf '%s\n' "second commit" > "${CASE_REPO}/second.txt"

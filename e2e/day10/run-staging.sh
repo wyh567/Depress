@@ -2,11 +2,17 @@
 set -Eeuo pipefail
 umask 077
 
+# shellcheck disable=SC1091
+source /mnt/d/depress/e2e/day10/candidate-gate.sh
+# shellcheck disable=SC1091
+source /mnt/d/depress/e2e/day10/identity-topology.sh
+
 readonly runner_mode="${1:-}"
 readonly exact_commit="${2:-}"
 readonly expected_parent="${3:-}"
 readonly source_dir="${4:-}"
 readonly residue_classification="${5:-}"
+readonly approved_changed_files_file="${DAY10_EXPECTED_CHANGED_FILES_FILE:-}"
 readonly source_branch="feature/phase4-mentor-mvp"
 readonly staging_root="/mnt/d/depress-day10-wsl"
 readonly release_archive="${staging_root}/release-${exact_commit}.tar"
@@ -24,7 +30,7 @@ readonly postgres_image="postgres:16-alpine@sha256:57c72fd2a128e416c7fcc49995886
 readonly redis_data="${state_root}/redis"
 readonly minio_data="${state_root}/minio"
 readonly mc_config="${state_root}/mc-root"
-readonly worker_runtime="/run/depress-worker"
+readonly worker_runtime="$day10_worker_runtime"
 readonly log_dir="/var/log/depress-day10"
 readonly artifact_dir="${staging_root}/artifacts"
 readonly test_results_dir="${staging_root}/test-results"
@@ -34,6 +40,7 @@ readonly run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM}"
 readonly run_dir="${observability_root}/${run_id}"
 readonly run_state_file="${run_dir}/state.log"
 readonly run_log_file="${run_dir}/runner.log"
+readonly identity_state_file="${state_root}/identities-${run_id}.state"
 readonly run_log_limit_bytes=$((16 * 1024 * 1024))
 
 # shellcheck disable=SC1091
@@ -69,7 +76,7 @@ logger_pid=""
 runner_parent_pid="$PPID"
 
 usage() {
-  echo "usage: run-staging.sh candidate-preflight|cleanup-proof|database-gate|diagnose|focused|d10-010|observability-nonzero-probe|observability-success-probe|observability-term-probe|remaining|preflight|single-insertion|smoke|stability|full|verify-clean <40-character-candidate-sha> <40-character-parent-sha> <clean-source-directory> <residue-classification>" >&2
+  echo "usage: DAY10_EXPECTED_CHANGED_FILES_FILE=/external/approved.txt run-staging.sh candidate-preflight|cleanup-proof|database-gate|diagnose|focused|d10-010|observability-nonzero-probe|observability-success-probe|observability-term-probe|remaining|preflight|single-insertion|smoke|stability|full|verify-clean <40-character-candidate-sha> <40-character-parent-sha> <clean-source-directory> <residue-classification>" >&2
   exit 64
 }
 
@@ -325,7 +332,7 @@ remove_final_secrets() {
     "$postgres_env_file" \
     "${config_dir}/seed-a.env" \
     "${config_dir}/seed-b.env" \
-    "${config_dir}/tls.key" \
+    "${config_dir}/tls/tls.key" \
     "${config_dir}/worker.env" \
     "${staging_root}/e2e.env"; do
     rm -f -- "$file"
@@ -392,12 +399,21 @@ cleanup() {
     remove_release
   fi
   rm -f -- "$release_archive"
-  remove_day10_staging_config
+  local config_cleanup_complete=1
+  local identity_cleanup_complete=1
+  remove_day10_staging_config || config_cleanup_complete=0
+  if (( config_cleanup_complete == 1 )); then
+    remove_day10_private_identities || identity_cleanup_complete=0
+  else
+    identity_cleanup_complete=0
+  fi
 
   local final_exit_status="$original_exit_status"
   local final_result="FAILURE"
-  if (( postgres_cleanup_complete == 0 )); then
-    echo "cleanup-result=partial postgres=ownership-check-failed" >&2
+  if (( postgres_cleanup_complete == 0 ||
+    config_cleanup_complete == 0 ||
+    identity_cleanup_complete == 0 )); then
+    echo "cleanup-result=partial postgres=${postgres_cleanup_complete} config=${config_cleanup_complete} identities=${identity_cleanup_complete}" >&2
     if (( final_exit_status == 0 )); then
       final_exit_status=70
     fi
@@ -433,7 +449,7 @@ handle_signal() {
 }
 
 verify_clean() {
-  local failed=0 unit
+  local failed=0 unit identity
   for unit in "${app_units[@]}" "${infrastructure_units[@]}"; do
     if systemctl is-active --quiet "$unit"; then
       echo "active-unit=$unit"
@@ -464,8 +480,24 @@ verify_clean() {
     echo "day10-network=present"
     failed=1
   fi
+  for identity in "${day10_private_users[@]}"; do
+    if id "$identity" >/dev/null 2>&1; then
+      echo "day10-user=present"
+      failed=1
+    fi
+  done
+  for identity in "${day10_private_groups[@]}"; do
+    if getent group "$identity" >/dev/null 2>&1; then
+      echo "day10-group=present"
+      failed=1
+    fi
+  done
+  if [[ -e "$config_dir" || -L "$config_dir" ]]; then
+    echo "day10-config=present"
+    failed=1
+  fi
   (( failed == 0 )) || return 1
-  echo "verify-clean=pass listeners=none processes=none containers=none volumes=none networks=none runtime=clean"
+  echo "verify-clean=pass listeners=none processes=none containers=none volumes=none networks=none identities=none runtime=clean"
 }
 
 preflight_candidate() {
@@ -481,6 +513,10 @@ preflight_candidate() {
     echo "clean source directory is required" >&2
     return 64
   }
+  [[ "$(readlink -m -- "$source_dir")" == "$source_dir" ]] || {
+    echo "source directory must be canonical" >&2
+    return 64
+  }
   [[ "$source_dir" == "${staging_root}/candidate-${exact_commit}" ]] || {
     echo "source directory must be the exact candidate worktree" >&2
     return 64
@@ -494,7 +530,33 @@ preflight_candidate() {
     return 72
   }
 
-  local local_head remote_head actual_parent changed_files windows_source
+  [[ -n "$approved_changed_files_file" &&
+    "$approved_changed_files_file" == /* &&
+    -f "$approved_changed_files_file" &&
+    ! -L "$approved_changed_files_file" ]] || {
+    echo "an external approved changed-files manifest is required" >&2
+    return 64
+  }
+
+  local manifest_real source_real release_real config_real staging_real
+  manifest_real="$(readlink -f -- "$approved_changed_files_file")"
+  source_real="$(readlink -f -- "$source_dir")"
+  release_real="$(readlink -m -- "$release_root")"
+  config_real="$(readlink -m -- "$config_dir")"
+  staging_real="$(readlink -m -- "$staging_root")"
+  [[ "$manifest_real" != "$source_real" &&
+    "$manifest_real" != "$source_real/"* &&
+    "$manifest_real" != "$release_real" &&
+    "$manifest_real" != "$release_real/"* &&
+    "$manifest_real" != "$config_real" &&
+    "$manifest_real" != "$config_real/"* &&
+    "$manifest_real" != "$staging_real" &&
+    "$manifest_real" != "$staging_real/"* ]] || {
+    echo "approved manifest must be outside source, staging, config, and release paths" >&2
+    return 64
+  }
+
+  local local_head remote_head actual_parent parent_line windows_source
   windows_source="$(wslpath -w "$source_dir")"
   local_head="$(
     cmd.exe /d /s /c "git -C ${windows_source} rev-parse HEAD" |
@@ -506,10 +568,16 @@ preflight_candidate() {
       tr -d '\r' |
       awk 'NR == 1 { print $1 }'
   )"
-  actual_parent="$(
-    cmd.exe /d /s /c "git -C ${windows_source} rev-parse ${exact_commit}^^" |
+  parent_line="$(
+    cmd.exe /d /s /c \
+      "git -C ${windows_source} rev-list --parents -n 1 ${exact_commit}" |
       tr -d '\r'
   )"
+  [[ "$(awk '{ print NF }' <<< "$parent_line")" == "2" ]] || {
+    echo "candidate must have exactly one parent" >&2
+    return 64
+  }
+  actual_parent="$(awk '{ print $2 }' <<< "$parent_line")"
   [[ -z "$(
     cmd.exe /d /s /c \
       "git -C ${windows_source} status --porcelain --untracked-files=all" |
@@ -519,22 +587,91 @@ preflight_candidate() {
   [[ "$remote_head" == "$exact_commit" ]]
   [[ "$actual_parent" == "$expected_parent" ]]
 
-  changed_files="$(
-    cmd.exe /d /s /c \
-      "git -C ${windows_source} diff --name-only ${expected_parent} ${exact_commit}" |
-      tr -d '\r'
-  )"
-  [[ "$(printf '%s\n' "$changed_files" | awk 'NF { count++ } END { print count + 0 }')" == "3" ]]
-  ! printf '%s\n' "$changed_files" | awk 'NF && tolower($0) !~ /\.md$/ { found=1 } END { exit !found }'
+  local actual_nul="${run_dir}/actual-changed-files.nul"
+  local actual_manifest="${run_dir}/actual-changed-files.txt"
+  local path manifest_status
+  local -a changed_files=()
+  cmd.exe /d /s /c \
+    "git -C ${windows_source} diff --name-only -z ${expected_parent} ${exact_commit}" \
+    > "$actual_nul"
+  while IFS= read -r -d '' path; do
+    changed_files+=("$path")
+  done < "$actual_nul"
+  rm -f -- "$actual_nul"
+  if (( ${#changed_files[@]} == 0 )); then
+    : > "$actual_manifest"
+  else
+    printf '%s\n' "${changed_files[@]}" |
+      LC_ALL=C sort > "$actual_manifest"
+  fi
+  if validate_changed_files_manifest \
+    "$manifest_real" "$actual_manifest"; then
+    rm -f -- "$actual_manifest"
+  else
+    manifest_status=$?
+    rm -f -- "$actual_manifest"
+    return "$manifest_status"
+  fi
 
   local port
   for port in "${selected_ports[@]}"; do
     ! ss -H -lnt "sport = :${port}" | grep -q .
   done
   [[ "$release_dir" == *"$exact_commit"* ]]
-  [[ "$config_dir" != "$source_dir"* && "$staging_root" != "$source_dir"* ]]
+  [[ "$config_real" != "$source_real" &&
+    "$config_real" != "$source_real/"* &&
+    "$release_real" != "$source_real" &&
+    "$release_real" != "$source_real/"* &&
+    "$(readlink -m -- "$release_archive")" != "$source_real/"* ]]
 
-  echo "preflight=pass clean-source=yes local=${local_head} remote=${remote_head} parent=${actual_parent} markdown-files=3 ports=free ownership=${residue_classification} release=${release_dir} secrets=external"
+  echo "preflight=pass clean-source=yes local=${local_head} remote=${remote_head} parent=${actual_parent} ports=free ownership=${residue_classification} release=${release_dir} secrets=external"
+}
+
+verify_release_archive_fidelity() {
+  local verification_dir="${run_dir}/archive-fidelity"
+  local archive_list="${verification_dir}/archive.list"
+  local path normalized blob_file archive_file archive_sha
+  local -a shell_paths=(
+    "deploy/release.sh"
+    "deploy/migrate.sh"
+    "deploy/verify-env-permissions.sh"
+    "e2e/day10/run-staging.sh"
+    "e2e/day10/provision-staging.sh"
+  )
+
+  install -d -m 0700 "$verification_dir"
+  tar -tf "$release_archive" > "$archive_list"
+  while IFS= read -r path; do
+    normalized=${path%/}
+    case "/${normalized}/" in
+      */.git/*|*/node_modules/*|*/.next/*|*/.turbo/*)
+        echo "release archive contains a forbidden repository or build path" >&2
+        return 1
+        ;;
+    esac
+    if [[ -n "$normalized" ]] && candidate_path_is_sensitive "$normalized"; then
+      echo "release archive contains a forbidden secret-like filename" >&2
+      return 1
+    fi
+  done < "$archive_list"
+
+  for path in "${shell_paths[@]}"; do
+    blob_file="${verification_dir}/blob-$RANDOM"
+    archive_file="${verification_dir}/archive-$RANDOM"
+    git -c safe.directory="$source_dir" -C "$source_dir" \
+      cat-file blob "${exact_commit}:${path}" > "$blob_file"
+    tar -xOf "$release_archive" "$path" > "$archive_file"
+    cmp -s "$blob_file" "$archive_file" || {
+      echo "release archive differs from a Git blob" >&2
+      return 1
+    }
+    bash -n "$archive_file"
+    rm -f -- "$blob_file" "$archive_file"
+  done
+  archive_sha="$(sha256sum "$release_archive" | awk '{ print $1 }')"
+  find "$verification_dir" -depth -mindepth 1 -delete
+  rmdir "$verification_dir"
+  echo "archive-byte-fidelity=PASS files=${#shell_paths[@]} sha256=${archive_sha}"
 }
 
 prepare_release() {
@@ -542,8 +679,9 @@ prepare_release() {
   windows_source="$(wslpath -w "$source_dir")"
   windows_archive="$(wslpath -w "$release_archive")"
   cmd.exe /d /s /c \
-    "git -C ${windows_source} archive --format=tar --output=${windows_archive} ${exact_commit}"
+    "git -C ${windows_source} -c core.autocrlf=false -c core.eol=lf archive --format=tar --output=${windows_archive} ${exact_commit}"
   [[ -f "$release_archive" ]] || return 1
+  verify_release_archive_fidelity
   [[ ! -e "$current_link" && ! -d "$release_dir" ]] || {
     echo "stale release path exists" >&2
     return 1
@@ -652,28 +790,20 @@ COMPOSE
 
   local migration_first migration_rerun
   migration_first="$(
-    (
-      set -a
-      # shellcheck disable=SC1091
-      source "${config_dir}/migration.env"
-      set +a
-      runuser -u depress-api --preserve-environment -- \
-        /usr/local/bin/pnpm --dir "$release_dir" \
-        --filter @depress/api db:migrate
-    )
+    DEPRESS_ROOT="$release_root" \
+      MIGRATION_ENV_FILE="${config_dir}/migration.env" \
+      MIGRATION_USER="$day10_migration_user" \
+      COREPACK_BIN=/usr/local/bin/corepack \
+      bash "${release_dir}/deploy/migrate.sh"
   )"
   [[ "$migration_first" == *"Applied 5 migration(s)"* ]]
   echo "migration-first=Applied 5 migration(s)"
   migration_rerun="$(
-    (
-      set -a
-      # shellcheck disable=SC1091
-      source "${config_dir}/migration.env"
-      set +a
-      runuser -u depress-api --preserve-environment -- \
-        /usr/local/bin/pnpm --dir "$release_dir" \
-        --filter @depress/api db:migrate
-    )
+    DEPRESS_ROOT="$release_root" \
+      MIGRATION_ENV_FILE="${config_dir}/migration.env" \
+      MIGRATION_USER="$day10_migration_user" \
+      COREPACK_BIN=/usr/local/bin/corepack \
+      bash "${release_dir}/deploy/migrate.sh"
   )"
   [[ "$migration_rerun" == *"Applied 0 migration(s)"* ]]
   echo "migration-rerun=Applied 0 migration(s)"
@@ -685,7 +815,7 @@ COMPOSE
       # shellcheck disable=SC1090
       source "$seed_file"
       set +a
-      runuser -u depress-api --preserve-environment -- \
+      runuser -u "$day10_api_user" --preserve-environment -- \
         /usr/local/bin/pnpm --dir "$release_dir" \
         --filter @depress/api auth:seed-mentor
     done
@@ -757,6 +887,21 @@ start_application() {
     start_tracked_unit "$unit"
   done
   wait_for_http "https://127.0.0.1:18443/health/ready"
+}
+
+verify_day10_env_permissions() {
+  DEPRESS_ENV_DIR="$config_dir" \
+    DEPRESS_API_USER="$day10_api_user" \
+    DEPRESS_API_GROUP="$day10_api_group" \
+    DEPRESS_OUTBOX_USER="$day10_outbox_user" \
+    DEPRESS_OUTBOX_GROUP="$day10_outbox_group" \
+    DEPRESS_WORKER_USER="$day10_worker_user" \
+    DEPRESS_WORKER_GROUP="$day10_worker_group" \
+    DEPRESS_MIGRATION_USER="$day10_migration_user" \
+    DEPRESS_MIGRATION_GROUP="$day10_migration_group" \
+    DEPRESS_DOCKER_GROUP="$day10_docker_group" \
+    DEPRESS_WORKER_ENV_FILE="${config_dir}/worker.env" \
+    bash "${release_dir}/deploy/verify-env-permissions.sh"
 }
 
 run_playwright() {
@@ -864,6 +1009,7 @@ clear_directory "$artifact_dir"
 phase_end clear-prior-evidence
 run_phase provision provision_day10_staging
 run_phase prepare-release prepare_release
+run_phase env-permission-matrix verify_day10_env_permissions
 
 if [[ "$runner_mode" == "database-gate" ]]; then
   system_postgres_pid_before="$(

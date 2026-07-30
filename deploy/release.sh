@@ -75,7 +75,10 @@ cleanup() {
 trap cleanup EXIT
 ARCHIVE_FILE=$(mktemp "${RELEASES_DIR}/.${COMMIT_SHA}.archive.XXXXXX")
 
-git -C "${SOURCE_DIR}" archive \
+git -C "${SOURCE_DIR}" \
+  -c core.autocrlf=false \
+  -c core.eol=lf \
+  archive \
   --format=tar \
   --output="${ARCHIVE_FILE}" \
   "${COMMIT_SHA}"

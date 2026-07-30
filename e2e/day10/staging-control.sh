@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck disable=SC1091
+source /mnt/d/depress/e2e/day10/identity-topology.sh
+
 command_name="${1:-}"
 shift || true
 
@@ -108,7 +111,7 @@ case "$command_name" in
     # shellcheck disable=SC1090
     source "$seed_file"
     set +a
-    runuser -u depress-api --preserve-environment -- \
+    runuser -u "$day10_api_user" --preserve-environment -- \
       /usr/local/bin/pnpm --dir "$release" --filter @depress/api auth:seed-mentor >/dev/null
     echo "stability-user-seeded"
     ;;
@@ -190,20 +193,30 @@ case "$command_name" in
     ss -lntp | awk 'NR == 1 || /:15432 |:16379 |:18443 |:19000 |:19001 /'
     ;;
   separation)
-    if runuser -u depress-api -- docker info >/dev/null 2>&1; then
-      echo "api-docker=unexpected-access"
-      exit 1
-    fi
-    runuser -u depress-worker -- docker info >/dev/null
+    DEPRESS_ENV_DIR=/etc/depress-day10 \
+      DEPRESS_API_USER="$day10_api_user" \
+      DEPRESS_API_GROUP="$day10_api_group" \
+      DEPRESS_OUTBOX_USER="$day10_outbox_user" \
+      DEPRESS_OUTBOX_GROUP="$day10_outbox_group" \
+      DEPRESS_WORKER_USER="$day10_worker_user" \
+      DEPRESS_WORKER_GROUP="$day10_worker_group" \
+      DEPRESS_MIGRATION_USER="$day10_migration_user" \
+      DEPRESS_MIGRATION_GROUP="$day10_migration_group" \
+      DEPRESS_DOCKER_GROUP="$day10_docker_group" \
+      DEPRESS_WORKER_ENV_FILE=/etc/depress-day10/worker.env \
+      bash "$release/deploy/verify-env-permissions.sh"
+    runuser -u "$day10_worker_user" -- docker info >/dev/null
     worker_pid="$(systemctl show "$worker" -p MainPID --value)"
-    nsenter -t "$worker_pid" -m -- runuser -u depress-worker -- test -w /run/depress-worker
+    nsenter -t "$worker_pid" -m -- runuser -u "$day10_worker_user" -- \
+      test -w "$day10_worker_runtime"
     for path in "$release" /etc /var/log /tmp; do
-      if nsenter -t "$worker_pid" -m -- runuser -u depress-worker -- test -w "$path"; then
+      if nsenter -t "$worker_pid" -m -- runuser -u "$day10_worker_user" -- \
+        test -w "$path"; then
         echo "unexpected-worker-write=$path"
         exit 1
       fi
     done
-    echo "api-docker=denied worker-docker=allowed worker-write=/run/depress-worker-only"
+    echo "api-docker=denied worker-docker=allowed worker-write=${day10_worker_runtime}-only"
     ;;
   network-boundaries)
     for port in 15432 16379 19000 19001; do

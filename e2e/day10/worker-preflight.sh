@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# shellcheck disable=SC1091
+source /mnt/d/depress/e2e/day10/identity-topology.sh
+
 readonly mode="${1:-}"
 readonly release="/opt/depress/current"
 readonly config_dir="/etc/depress-day10"
 readonly worker_env="${config_dir}/worker.env"
 readonly worker_unit="depress-pointer-worker.service"
-readonly worker_runtime="/run/depress-worker"
+readonly worker_runtime="$day10_worker_runtime"
 
 run_worker_with_env() {
   (
@@ -16,7 +19,7 @@ run_worker_with_env() {
     set +a
     export HOME="$worker_runtime"
     export TMPDIR="$worker_runtime"
-    runuser -u depress-worker --preserve-environment -- "$@"
+    runuser -u "$day10_worker_user" --preserve-environment -- "$@"
   )
 }
 
@@ -39,7 +42,8 @@ safe_check() {
 }
 
 independent_checks() {
-  install -d -o depress-worker -g depress-runtime -m 0700 "$worker_runtime"
+  install -d -o "$day10_worker_user" -g "$day10_worker_group" \
+    -m 0700 "$worker_runtime"
 
   safe_check production-parser run_worker_api_check config
   safe_check postgresql-connection run_worker_api_check postgres
@@ -72,12 +76,12 @@ idle_checks() {
   [[ "$initial_pid" =~ ^[1-9][0-9]*$ ]]
 
   safe_check worker-runtime-writable \
-    nsenter -t "$initial_pid" -m -- runuser -u depress-worker -- \
+    nsenter -t "$initial_pid" -m -- runuser -u "$day10_worker_user" -- \
     /usr/bin/test -w "$worker_runtime"
   safe_check release-readable-in-unit \
-    nsenter -t "$initial_pid" -m -- runuser -u depress-worker -- \
+    nsenter -t "$initial_pid" -m -- runuser -u "$day10_worker_user" -- \
     /usr/bin/test -r "${release}/.depress-release"
-  if nsenter -t "$initial_pid" -m -- runuser -u depress-worker -- \
+  if nsenter -t "$initial_pid" -m -- runuser -u "$day10_worker_user" -- \
     /usr/bin/test -w "$release"; then
     echo "release-not-writable-in-unit=fail" >&2
     return 1

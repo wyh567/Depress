@@ -23,10 +23,12 @@ trap cleanup EXIT
 
 chmod 0755 "${SANDBOX}"
 DEPRESS_ROOT="${SANDBOX}/depress"
-MIGRATION_ENV_FILE="${SANDBOX}/migration.env"
+ENV_DIR="${SANDBOX}/etc/depress"
+MIGRATION_ENV_FILE="${ENV_DIR}/migration.env"
 RESULT_DIR="${SANDBOX}/result"
 FAKE_COREPACK="${SANDBOX}/corepack"
-mkdir -p "${DEPRESS_ROOT}/releases/test" "${RESULT_DIR}"
+mkdir -p "${DEPRESS_ROOT}/releases/test" "${RESULT_DIR}" "${SANDBOX}/etc"
+install -d -o root -g root -m 0711 "${ENV_DIR}"
 ln -s "${DEPRESS_ROOT}/releases/test" "${DEPRESS_ROOT}/current"
 chown "${TEST_USER}:${TEST_GROUP}" "${RESULT_DIR}"
 chmod 0700 "${RESULT_DIR}"
@@ -57,6 +59,9 @@ run_migration() {
 }
 
 write_migration_env "DATABASE_URL=postgresql://placeholder.invalid/depress"
+[[ "$(stat -c '%U:%G:%a' "${ENV_DIR}")" == "root:root:711" ]]
+runuser -u "${TEST_USER}" -- test -x "${ENV_DIR}"
+runuser -u "${TEST_USER}" -- test ! -r "${ENV_DIR}"
 runuser -u "${TEST_USER}" -- test -r "${MIGRATION_ENV_FILE}"
 for denied_user in depress-api depress-outbox depress-worker; do
   if id "${denied_user}" >/dev/null 2>&1; then
@@ -67,6 +72,14 @@ run_migration
 [[ -f "${RESULT_DIR}/executed" ]]
 echo "PASS: only the migration identity reads the env before the downgraded command"
 echo "PASS: migration runs with the target UID/GID and exports only DATABASE_URL"
+
+chmod 0750 "${ENV_DIR}"
+if run_migration >"${SANDBOX}/parent-permission.log" 2>&1; then
+  echo "migration security test failed: inaccessible parent directory was accepted" >&2
+  exit 1
+fi
+chmod 0711 "${ENV_DIR}"
+echo "PASS: migration fails closed when its identity cannot traverse the env directory"
 
 rm -f -- "${RESULT_DIR}/executed"
 write_migration_env \

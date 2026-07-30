@@ -1664,7 +1664,9 @@ test.describe("Day 10 full technical acceptance", () => {
         persistEvidence();
         expect(evidence.separation).toContain("api-docker=denied");
         expect(evidence.separation).toContain("worker-docker=allowed");
-        expect(evidence.separation).toContain("worker-write=/run/depress-worker-only");
+        expect(evidence.separation).toContain(
+          "worker-write=/run/depress-day10-worker-only"
+        );
         expect(evidence.observations.networkBoundaries).toBe(
           "postgres=loopback redis=loopback s3=loopback docker-tcp=absent"
         );
