@@ -17,6 +17,8 @@ readonly config_dir="/etc/depress-day10"
 readonly staging_root="${SANDBOX}/staging"
 readonly state_root="${SANDBOX}/state"
 readonly identity_state_file="${state_root}/identities-${run_id}.state"
+readonly migration_runtime="/run/depress-day10-migration-${run_id}"
+readonly migration_runtime_state_file="${state_root}/migration-runtime-${run_id}.state"
 readonly log_dir="${SANDBOX}/log"
 readonly redis_data="${SANDBOX}/redis"
 readonly postgres_port=15432
@@ -30,6 +32,7 @@ cleanup() {
   local cleanup_status=0
   set +e
   remove_day10_staging_config || cleanup_status=$?
+  remove_migration_runtime || cleanup_status=$?
   remove_day10_private_identities || cleanup_status=$?
   if [[ -n ${SANDBOX:-} && -d ${SANDBOX} && ${SANDBOX} == /tmp/* ]]; then
     rm -rf -- "${SANDBOX}"
@@ -69,6 +72,20 @@ printf '%s\n' \
 
 SYSTEMD_UNIT_PATH="${DAY10_SYSTEMD_UNIT_DIR}:/etc/systemd/system:/usr/lib/systemd/system" \
   provision_day10_staging
+
+ln -s "$log_dir" "$migration_runtime"
+if register_migration_runtime >"${SANDBOX}/preexisting-runtime.log" 2>&1; then
+  echo "topology test failed: pre-existing migration runtime was accepted" >&2
+  exit 1
+fi
+rm -- "$migration_runtime"
+register_migration_runtime
+
+install -d -o "$day10_migration_user" -g "$day10_migration_group" \
+  -m 0700 "$migration_runtime"
+runuser -u "$day10_migration_user" -- touch "${migration_runtime}/cache-probe"
+[[ "$(stat -c '%U:%G:%a' "$migration_runtime")" == "${day10_migration_user}:${day10_migration_group}:700" ]]
+[[ "$(stat -c '%U:%G:%a' "$migration_runtime_state_file")" == "root:root:600" ]]
 
 [[ "$(stat -c '%U:%G:%a' "$config_dir")" == "root:root:711" ]]
 [[ "$(stat -c '%U:%G:%a' "${config_dir}/tls")" == "root:root:700" ]]
@@ -112,4 +129,15 @@ grep -Fxq "worker_docker=ALLOWED" \
 grep -Fxq "migration_docker=DENIED" \
   "${SANDBOX}/permission-evidence.log"
 
+remove_day10_staging_config
+remove_migration_runtime
+remove_day10_private_identities
+[[ ! -e "$migration_runtime" && ! -L "$migration_runtime" ]]
+[[ ! -e "$migration_runtime_state_file" && ! -L "$migration_runtime_state_file" ]]
+for identity in "${day10_private_users[@]}"; do
+  ! id "$identity" >/dev/null 2>&1
+done
+
 echo "PASS: disposable users, private groups, env permissions, and units agree"
+echo "PASS: unmarked pre-existing migration runtime is rejected"
+echo "PASS: marked migration runtime is removed before disposable identities"

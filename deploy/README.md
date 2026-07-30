@@ -95,6 +95,15 @@ cannot change either identity.
    identity to them. The root-started migration script drops privileges first;
    only then does `depress-migration` read its root-owned, non-writable file.
    That file must contain exactly one non-empty `DATABASE_URL=...` line.
+   `depress-migration` remains a non-login identity without a home directory.
+   `migrate.sh` creates or reuses `/run/depress-migration` as its private
+   `HOME`, Corepack home, and cache root. The directory and its cache
+   subdirectories are `depress-migration:depress-migration` mode `0700`; an
+   existing path with different metadata or any symlink fails closed. This
+   runtime contains only package-manager cache and non-sensitive runtime files,
+   never `DATABASE_URL`. It may be recreated after `/run` is cleared on reboot.
+   The migration identity can read, but cannot modify, the root-owned
+   `migration.env`, and it must not belong to the `docker` group.
 6. From a clean checkout of the exact commit, run
    `sudo DEPRESS_API_ORIGIN=https://<api-origin> bash deploy/release.sh "$PWD" "$(git rev-parse HEAD)"`.
 7. Run `sudo bash deploy/migrate.sh` explicitly, then

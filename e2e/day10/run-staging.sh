@@ -37,6 +37,8 @@ readonly test_results_dir="${staging_root}/test-results"
 readonly signup_probe_email="day10-signup-probe@invalid.test"
 readonly observability_root="/var/tmp/depress-day10-runs"
 readonly run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM}"
+readonly migration_runtime="/run/depress-day10-migration-${run_id}"
+readonly migration_runtime_state_file="${state_root}/migration-runtime-${run_id}.state"
 readonly run_dir="${observability_root}/${run_id}"
 readonly run_state_file="${run_dir}/state.log"
 readonly run_log_file="${run_dir}/runner.log"
@@ -183,7 +185,7 @@ handle_err() {
 
 is_allowed_cleanup_path() {
   case "$1" in
-    "$release_dir"|"$redis_data"|"$minio_data"|"$mc_config"|"$worker_runtime"|"$log_dir"|"$artifact_dir"|"$test_results_dir")
+    "$release_dir"|"$redis_data"|"$minio_data"|"$mc_config"|"$worker_runtime"|"$migration_runtime"|"$log_dir"|"$artifact_dir"|"$test_results_dir")
       return 0
       ;;
     *)
@@ -385,6 +387,8 @@ cleanup() {
   done
 
   clear_directory "$worker_runtime"
+  local migration_runtime_cleanup_complete=1
+  remove_migration_runtime || migration_runtime_cleanup_complete=0
   clear_directory "$redis_data"
   clear_directory "$minio_data"
   clear_directory "$mc_config"
@@ -411,14 +415,15 @@ cleanup() {
   local final_exit_status="$original_exit_status"
   local final_result="FAILURE"
   if (( postgres_cleanup_complete == 0 ||
+    migration_runtime_cleanup_complete == 0 ||
     config_cleanup_complete == 0 ||
     identity_cleanup_complete == 0 )); then
-    echo "cleanup-result=partial postgres=${postgres_cleanup_complete} config=${config_cleanup_complete} identities=${identity_cleanup_complete}" >&2
+    echo "cleanup-result=partial postgres=${postgres_cleanup_complete} migration-runtime=${migration_runtime_cleanup_complete} config=${config_cleanup_complete} identities=${identity_cleanup_complete}" >&2
     if (( final_exit_status == 0 )); then
       final_exit_status=70
     fi
   else
-    echo "cleanup-result=complete units=${#started_units[@]} database=$database_created role=$database_role_created postgres-container=${postgres_container_id:-none} project=${postgres_compose_project} release=$release_created ports=closed runtime=clean artifacts=removed"
+    echo "cleanup-result=complete units=${#started_units[@]} database=$database_created role=$database_role_created postgres-container=${postgres_container_id:-none} project=${postgres_compose_project} release=$release_created ports=closed runtime=clean migration-runtime=removed artifacts=removed"
   fi
   if (( final_exit_status == 0 )); then
     final_result="SUCCESS"
@@ -462,6 +467,16 @@ verify_clean() {
   fi
   if find "$worker_runtime" -mindepth 1 -print -quit 2>/dev/null | grep -q .; then
     echo "worker-runtime=not-clean"
+    failed=1
+  fi
+  if find /run -maxdepth 1 \( -type d -o -type l \) \
+    -name 'depress-day10-migration-*' -print -quit 2>/dev/null | grep -q .; then
+    echo "migration-runtime=present"
+    failed=1
+  fi
+  if find "$state_root" -maxdepth 1 \( -type f -o -type l \) \
+    -name 'migration-runtime-*.state' -print -quit 2>/dev/null | grep -q .; then
+    echo "migration-runtime-marker=present"
     failed=1
   fi
   if ps -eo args= | awk '/pnpm --dir \/opt\/depress\/current|nginx.*\/etc\/depress-day10|redis-server.*16379|minio.*19000|postgres.*\/var\/lib\/depress-day10\/postgres/ && !/awk/ {found=1} END {exit !found}'; then
@@ -793,6 +808,7 @@ COMPOSE
     DEPRESS_ROOT="$release_root" \
       MIGRATION_ENV_FILE="${config_dir}/migration.env" \
       MIGRATION_USER="$day10_migration_user" \
+      MIGRATION_RUNTIME_DIR="$migration_runtime" \
       COREPACK_BIN=/usr/local/bin/corepack \
       bash "${release_dir}/deploy/migrate.sh"
   )"
@@ -802,6 +818,7 @@ COMPOSE
     DEPRESS_ROOT="$release_root" \
       MIGRATION_ENV_FILE="${config_dir}/migration.env" \
       MIGRATION_USER="$day10_migration_user" \
+      MIGRATION_RUNTIME_DIR="$migration_runtime" \
       COREPACK_BIN=/usr/local/bin/corepack \
       bash "${release_dir}/deploy/migrate.sh"
   )"
@@ -1008,6 +1025,7 @@ clear_directory "$test_results_dir"
 clear_directory "$artifact_dir"
 phase_end clear-prior-evidence
 run_phase provision provision_day10_staging
+run_phase migration-runtime-register register_migration_runtime
 run_phase prepare-release prepare_release
 run_phase env-permission-matrix verify_day10_env_permissions
 

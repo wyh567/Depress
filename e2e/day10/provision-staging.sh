@@ -3,10 +3,69 @@
 day10_database_password=""
 day10_config_created=0
 day10_identity_state_written=0
+day10_migration_runtime_registered=0
 day10_created_users=()
 day10_created_groups=()
 day10_units_created=()
 day10_unit_dir="${DAY10_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+
+register_migration_runtime() {
+  [[ "$migration_runtime" == /run/depress-day10-migration-"${run_id}" &&
+    "$(readlink -m -- "$migration_runtime")" == "$migration_runtime" ]] || {
+    echo "refusing an unexpected migration runtime path" >&2
+    return 71
+  }
+  [[ ! -e "$migration_runtime" && ! -L "$migration_runtime" ]] || {
+    echo "refusing a pre-existing Day 10 migration runtime" >&2
+    return 71
+  }
+  [[ ! -e "$migration_runtime_state_file" && ! -L "$migration_runtime_state_file" ]] || {
+    echo "refusing a pre-existing migration runtime marker" >&2
+    return 71
+  }
+  install -d -o root -g root -m 0755 "$state_root"
+  printf '%s\n' \
+    "run_id=${run_id}" \
+    "candidate=${exact_commit}" \
+    "runtime=${migration_runtime}" \
+    "identity=${day10_migration_user}:${day10_migration_group}" \
+    > "$migration_runtime_state_file"
+  chmod 0600 "$migration_runtime_state_file"
+  day10_migration_runtime_registered=1
+}
+
+remove_migration_runtime() {
+  (( day10_migration_runtime_registered == 1 )) || return 0
+  [[ -f "$migration_runtime_state_file" && ! -L "$migration_runtime_state_file" &&
+    "$(stat -c '%U:%G:%a' "$migration_runtime_state_file")" == "root:root:600" ]] || {
+    echo "refusing migration runtime cleanup without the exact root-owned marker" >&2
+    return 70
+  }
+  grep -Fxq "run_id=${run_id}" "$migration_runtime_state_file" &&
+    grep -Fxq "candidate=${exact_commit}" "$migration_runtime_state_file" &&
+    grep -Fxq "runtime=${migration_runtime}" "$migration_runtime_state_file" &&
+    grep -Fxq "identity=${day10_migration_user}:${day10_migration_group}" \
+      "$migration_runtime_state_file" || {
+      echo "refusing migration runtime cleanup after ownership marker changed" >&2
+      return 70
+    }
+  ! pgrep -u "$day10_migration_user" >/dev/null 2>&1 || {
+    echo "refusing migration runtime cleanup with a live migration process" >&2
+    return 70
+  }
+  if [[ -e "$migration_runtime" || -L "$migration_runtime" ]]; then
+    [[ -d "$migration_runtime" && ! -L "$migration_runtime" &&
+      "$(readlink -m -- "$migration_runtime")" == "$migration_runtime" &&
+      "$(stat -c '%U:%G:%a' "$migration_runtime")" == "${day10_migration_user}:${day10_migration_group}:700" ]] || {
+      echo "refusing cleanup after migration runtime metadata changed" >&2
+      return 70
+    }
+    find "$migration_runtime" -depth -mindepth 1 -delete
+    rmdir "$migration_runtime"
+  fi
+  rm -- "$migration_runtime_state_file"
+  day10_migration_runtime_registered=0
+}
 
 create_day10_private_identities() {
   local index user group
