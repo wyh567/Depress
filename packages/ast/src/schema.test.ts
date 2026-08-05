@@ -62,6 +62,48 @@ describe("DocSchema accepts valid input", () => {
     });
     expect(result.success).toBe(true);
   });
+
+  it("accepts optional bilingual English metadata fields", () => {
+    const result = parseDoc({
+      type: "doc",
+      metadata: {
+        title: "结构化编辑器",
+        titleEn: "A Structured Editor",
+        authors: [
+          {
+            name: "王伟",
+            nameEn: "WANG Wei",
+            affiliationIds: ["aff-1"],
+          },
+        ],
+        affiliations: [
+          {
+            id: "aff-1",
+            name: "计算机学院",
+            nameEn: "School of Computer Science",
+          },
+        ],
+        abstract: "中文摘要。",
+        abstractEn: "English abstract.",
+        keywords: ["学术出版"],
+        keywordsEn: ["academic publishing", "AST"],
+      },
+      content: [{ type: "paragraph", content: [text("Body")] }],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.metadata?.titleEn).toBe("A Structured Editor");
+      expect(result.data.metadata?.abstractEn).toBe("English abstract.");
+      expect(result.data.metadata?.keywordsEn).toEqual([
+        "academic publishing",
+        "AST",
+      ]);
+      expect(result.data.metadata?.authors?.[0]?.nameEn).toBe("WANG Wei");
+      expect(result.data.metadata?.affiliations?.[0]?.nameEn).toBe(
+        "School of Computer Science",
+      );
+    }
+  });
 });
 
 describe("DocSchema metadata validation", () => {
@@ -70,10 +112,21 @@ describe("DocSchema metadata validation", () => {
       type: "doc",
       metadata: {
         title: "  Title  ",
-        authors: [{ name: "  Ada  ", affiliationIds: ["  aff-1  "] }],
-        affiliations: [{ id: "  aff-1  ", name: "  Lab  " }],
+        titleEn: "  Title En  ",
+        authors: [
+          {
+            name: "  Ada  ",
+            nameEn: "  ADA  ",
+            affiliationIds: ["  aff-1  "],
+          },
+        ],
+        affiliations: [
+          { id: "  aff-1  ", name: "  Lab  ", nameEn: "  Lab En  " },
+        ],
         abstract: "  Abstract  ",
+        abstractEn: "  Abstract En  ",
         keywords: ["  kw1  ", "kw2"],
+        keywordsEn: ["  en1  ", "en2", "en1"],
       },
       content: [],
     });
@@ -81,10 +134,15 @@ describe("DocSchema metadata validation", () => {
     if (result.success) {
       expect(result.data.metadata).toEqual({
         title: "Title",
-        authors: [{ name: "Ada", affiliationIds: ["aff-1"] }],
-        affiliations: [{ id: "aff-1", name: "Lab" }],
+        titleEn: "Title En",
+        authors: [
+          { name: "Ada", nameEn: "ADA", affiliationIds: ["aff-1"] },
+        ],
+        affiliations: [{ id: "aff-1", name: "Lab", nameEn: "Lab En" }],
         abstract: "Abstract",
+        abstractEn: "Abstract En",
         keywords: ["kw1", "kw2"],
+        keywordsEn: ["en1", "en2"],
       });
     }
   });

@@ -4,12 +4,14 @@ exports[`renderIeeeTypstDocument > renders a small paper into the IEEE template 
 "// DePress IEEE template (immutable asset — never user-editable)
 #set page(
   paper: "us-letter",
-  margin: (x: 0.62in, top: 0.75in, bottom: 1in),
+  margin: (x: 0.75in, top: 0.75in, bottom: 1in),
   columns: 2,
+  numbering: "1",
+  number-align: center,
 )
 #set columns(gutter: 0.2in)
 #set text(font: "Times New Roman", size: 10pt)
-#set par(justify: true, first-line-indent: 1em)
+#set par(justify: true, first-line-indent: 1em, leading: 0.65em)
 #set heading(numbering: "I.A.1)")
 #show heading.where(level: 1): set align(center)
 #show heading.where(level: 1): set text(size: 10pt, weight: "regular")
@@ -19,10 +21,26 @@ exports[`renderIeeeTypstDocument > renders a small paper into the IEEE template 
   top + center,
   float: true,
   scope: "parent",
-  clearance: 2em,
+  clearance: 1.25em,
 )[
   #set align(center)
-  #text(size: 24pt)[DePress Draft]
+  #set par(first-line-indent: 0em, leading: 0.55em)
+  #text(size: 18pt)[DePress Draft]
+  
+  
+]
+
+#place(
+  top,
+  float: true,
+  scope: "parent",
+  clearance: 1em,
+)[
+  #set par(first-line-indent: 0em, justify: true, leading: 0.55em)
+  #text(size: 9pt)[
+    
+    
+  ]
 ]
 
 = Introduction

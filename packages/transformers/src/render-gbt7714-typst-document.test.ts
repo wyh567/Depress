@@ -34,21 +34,68 @@ describe("renderGbt7714TypstDocument", () => {
     expect(source.indexOf("张三")).toBeLessThan(source.indexOf("Jane Smith"));
     expect(source.indexOf("Jane Smith")).toBeLessThan(source.indexOf("独立作者"));
     expect(source).toContain("张三#super[1]");
-    expect(source).toContain("Jane Smith#super[1, 2]");
-    expect(source).toContain("#super[1] 某大学心理学院");
-    expect(source).toContain("#super[2] Digital Health Laboratory");
-    expect(source).toContain("#strong[摘要]");
-    expect(source).toContain("#strong[关键词]");
+    expect(source).toContain("Jane Smith#super[1，2]");
+    expect(source).toContain("#super[1]某大学心理学院");
+    expect(source).toContain("#super[2]Digital Health Laboratory");
+    expect(source).toContain("#strong[摘要：]");
+    expect(source).toContain("#strong[关键词：]");
     expect(source).toContain("抑郁症；数字干预；Café");
+    expect(source).toContain('numbering: "1"');
+    expect(source).toContain("first-line-indent: 2em");
+    expect(source).toContain(" \\\n");
     expect(source).not.toContain("aff-1");
     expect(source).not.toContain("aff-2");
+  });
+
+  it("renders Chinese-then-English front matter when English fields exist", () => {
+    const bilingual = {
+      ...paper,
+      metadata: {
+        ...paper.metadata,
+        titleEn: "Chinese Journal Paper: Café",
+        abstractEn: 'Has $ and "quotes".',
+        keywordsEn: ["depression", "digital intervention"],
+        authors: [
+          { name: "张三", nameEn: "ZHANG San", affiliationIds: ["aff-1"] },
+          {
+            name: "Jane Smith",
+            nameEn: "Jane Smith",
+            affiliationIds: ["aff-1", "aff-2"],
+          },
+        ],
+        affiliations: [
+          {
+            id: "aff-1",
+            name: "某大学心理学院",
+            nameEn: "School of Psychology",
+          },
+          {
+            id: "aff-2",
+            name: "Digital Health Laboratory",
+            nameEn: "Digital Health Laboratory",
+          },
+        ],
+      },
+    };
+    const source = renderGbt7714TypstDocument(bilingual);
+    expect(source.indexOf("中文期刊论文：Café")).toBeLessThan(
+      source.indexOf("Chinese Journal Paper: Café"),
+    );
+    expect(source.indexOf("#strong[摘要：]")).toBeLessThan(
+      source.indexOf("#strong[Abstract:]"),
+    );
+    expect(source).toContain("ZHANG San#super[1]");
+    expect(source).toContain("#super[1]School of Psychology");
+    expect(source).toContain("#strong[Key words:]");
+    expect(source).toContain("depression; digital intervention");
+    expect(source).toContain('Has \\$ and "quotes".');
   });
 
   it("omits absent optional metadata and uses the safe title fallback", () => {
     const source = renderGbt7714TypstDocument({ type: "doc", content: [] });
     expect(source).toContain("DePress Draft");
-    expect(source).not.toContain("#strong[摘要]");
-    expect(source).not.toContain("#strong[关键词]");
+    expect(source).not.toContain("#strong[摘要：]");
+    expect(source).not.toContain("#strong[关键词：]");
     expect(source).not.toContain("Unknown Author");
     expect(source).not.toContain("#super[");
   });
@@ -56,7 +103,20 @@ describe("renderGbt7714TypstDocument", () => {
   it("escapes Typst-sensitive metadata without unresolved placeholders", () => {
     const source = renderGbt7714TypstDocument(paper);
     expect(source).toContain('含有 \\$、"引号"、C:\\\\docs、\\[方括号\\]');
-    for (const placeholder of ["TITLE", "AUTHORS", "AFFILIATIONS", "ABSTRACT", "KEYWORDS", "BODY", "BIBLIOGRAPHY"]) {
+    for (const placeholder of [
+      "TITLE_EN",
+      "AUTHORS_EN",
+      "AFFILIATIONS_EN",
+      "ABSTRACT_EN",
+      "KEYWORDS_EN",
+      "TITLE",
+      "AUTHORS",
+      "AFFILIATIONS",
+      "ABSTRACT",
+      "KEYWORDS",
+      "BODY",
+      "BIBLIOGRAPHY",
+    ]) {
       expect(source).not.toContain(`{{${placeholder}}}`);
     }
   });

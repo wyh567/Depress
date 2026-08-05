@@ -419,13 +419,14 @@ function metadataControls(page: Page) {
   return {
     title: page.getByPlaceholder("论文标题", { exact: true }),
     abstract: page.getByPlaceholder("摘要（纯文本）", { exact: true }),
-    keywords: page.getByPlaceholder("AST, Typst, academic publishing", { exact: true }),
-    authors: page.getByPlaceholder("Ada Lovelace | aff-1\n王伟 | aff-1,aff-2", {
+    keywords: page.getByPlaceholder("学术出版, 结构化编辑", { exact: true }),
+    authors: page.getByPlaceholder("Ada Lovelace | aff-1\n王伟 / WANG Wei | aff-1,aff-2", {
       exact: true,
     }),
-    affiliations: page.getByPlaceholder("aff-1 | Analytical Engines Lab\naff-2 | 计算机学院", {
-      exact: true,
-    }),
+    affiliations: page.getByPlaceholder(
+      "aff-1 | Analytical Engines Lab\naff-2 | 计算机学院 / School of CS",
+      { exact: true },
+    ),
   };
 }
 

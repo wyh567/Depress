@@ -9,7 +9,7 @@
 - Phase 4: **IN PROGRESS**
 - P4-00: **COMPLETE**
 - P4-01: **COMPLETE**
-- Last Updated: 2026-07-11（P4-00 architecture freeze complete；P4-01 CI baseline complete；P4-02 not started；Phase 4 product features remain not implemented）
+- Last Updated: 2026-08-04（双语学术元数据：titleEn/abstractEn/keywordsEn/nameEn；GB/T 先中后英；IEEE/Elsevier 英文字段优先；仍非官方模板认证）
 
 ## Phase 1 — Editor Core & AST Contract
 
@@ -490,4 +490,5 @@ P4-01 begins immediately after the documentation freeze. P4-02 must finish befor
 - 完整 version history / restore UI（Phase 4 Stretch；不阻塞 Phase 4 COMPLETE）
 - 完整 multi-project workspace UI（Phase 4 Stretch；Project 数据边界与 default Project 属于 Core）
 - 完整 CSL-JSON 全字段 / citeproc 浏览器预览
-- IEEE 完整 authors / affiliations / abstract / keywords 排版（TODO #1 已知非目标；非 Phase 3 回归）
+- [x] IEEE 完整 authors / affiliations / abstract / Index Terms 排版（2026-08-04；对齐 Elsevier/GB/T 语义完整度；非官方 IEEE 模板认证）
+- [x] 双语学术元数据与模板渲染（2026-08-04；GB/T 先中后英；IEEE/Elsevier 英文字段优先；未含中图分类号/基金/收稿日期）

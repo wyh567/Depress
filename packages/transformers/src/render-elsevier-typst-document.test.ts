@@ -49,6 +49,41 @@ describe("renderElsevierTypstDocument", () => {
     expect(source).not.toContain("aff-2");
   });
 
+  it("prefers English metadata fields when present", () => {
+    const source = renderElsevierTypstDocument({
+      ...paper,
+      metadata: {
+        ...paper.metadata,
+        title: "中文题名",
+        titleEn: "English Manuscript Title",
+        abstract: "中文摘要",
+        abstractEn: "English abstract body",
+        keywords: ["中文"],
+        keywordsEn: ["AST", "Café"],
+        authors: [
+          {
+            name: "李华",
+            nameEn: "LI Hua",
+            affiliationIds: ["aff-1"],
+          },
+        ],
+        affiliations: [
+          {
+            id: "aff-1",
+            name: "计算语言学实验室",
+            nameEn: "Computational Linguistics Lab",
+          },
+        ],
+      },
+    });
+    expect(source).toContain("English Manuscript Title");
+    expect(source).not.toContain("中文题名");
+    expect(source).toContain("LI Hua#super[1]");
+    expect(source).toContain("#super[1] Computational Linguistics Lab");
+    expect(source).toContain("English abstract body");
+    expect(source).toContain("AST, Café");
+  });
+
   it("renders abstract and keywords only when present", () => {
     const source = renderElsevierTypstDocument(paper);
     expect(source).toContain("#strong[Abstract]");

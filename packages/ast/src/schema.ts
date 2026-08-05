@@ -76,6 +76,8 @@ export const DocAffiliationSchema = z
   .object({
     id: trimmedNonEmpty,
     name: trimmedNonEmpty,
+    // Optional English affiliation line for bilingual Chinese-journal front matter.
+    nameEn: trimmedNonEmpty.optional(),
   })
   .strict();
 export type DocAffiliation = z.infer<typeof DocAffiliationSchema>;
@@ -83,6 +85,8 @@ export type DocAffiliation = z.infer<typeof DocAffiliationSchema>;
 export const DocAuthorSchema = z
   .object({
     name: trimmedNonEmpty,
+    // Optional English / romanized display name for bilingual front matter.
+    nameEn: trimmedNonEmpty.optional(),
     // Optional refs into metadata.affiliations[].id — validated on DocMetadata.
     affiliationIds: z.array(trimmedNonEmpty).optional(),
   })
@@ -107,10 +111,14 @@ const DocKeywordsSchema = z
 export const DocMetadataSchema = z
   .object({
     title: trimmedNonEmpty.optional(),
+    // Optional English title for bilingual Chinese-journal manuscripts.
+    titleEn: trimmedNonEmpty.optional(),
     authors: z.array(DocAuthorSchema).optional(),
     affiliations: z.array(DocAffiliationSchema).optional(),
     abstract: trimmedNonEmpty.optional(),
+    abstractEn: trimmedNonEmpty.optional(),
     keywords: DocKeywordsSchema.optional(),
+    keywordsEn: DocKeywordsSchema.optional(),
   })
   .strict()
   .superRefine((meta, ctx) => {
