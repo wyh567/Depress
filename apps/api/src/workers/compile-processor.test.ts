@@ -194,14 +194,26 @@ describe("processCompileJob", () => {
   });
 
   it("still runs the sandbox finally-cleanup when the upload throws", async () => {
-    // Real sandbox with a fake docker runner: the tmp dir must be gone even
-    // though the artifact upload fails afterwards.
+    // Real sandbox with a fake Docker process. Pin a non-root runtime identity
+    // so this fixture exercises the same path on Windows and when the test
+    // suite itself runs as root on Linux; production correctly rejects UID 0.
     const fs = await import("node:fs/promises");
     const { join } = await import("node:path");
-    const { createTypstSandboxRunner, SANDBOX_OUTPUT_FILE } = await import("./typst-sandbox");
+    const { createTypstSandboxRunner, SANDBOX_INPUT_FILE, SANDBOX_OUTPUT_FILE } =
+      await import("./typst-sandbox");
     const dirs: string[] = [];
+    const spawnCalls: Array<{
+      command: string;
+      args: readonly string[];
+      shell: boolean;
+    }> = [];
+    let inputMode = 0;
+    let inputContainsCr = true;
+    let inputHasShebang = true;
     const sandbox = createTypstSandboxRunner({
-      spawnProcess: (_cmd, args) => {
+      resolveRuntimeIdentity: () => ({ uid: 124, gid: 125 }),
+      spawnProcess: (command, args, options) => {
+        spawnCalls.push({ command, args, shell: options.shell });
         // -v mount is "<workDir>:/work"; lastIndexOf handles Windows drive colons.
         const mount = args[args.indexOf("-v") + 1] ?? "";
         const workDir = mount.slice(0, mount.lastIndexOf(":"));
@@ -215,15 +227,28 @@ describe("processCompileJob", () => {
         child.stderr = new PassThrough();
         child.kill = () => true;
         queueMicrotask(() => {
-          void Promise.all([
-            fs.writeFile(args[args.indexOf("--cidfile") + 1] ?? "", "b".repeat(64)),
-            fs.writeFile(join(workDir, SANDBOX_OUTPUT_FILE), Buffer.from("%PDF-1.7")),
-          ]).then(() => child.emit("close", 0, null));
+          void (async () => {
+            const inputPath = join(workDir, SANDBOX_INPUT_FILE);
+            const [inputStat, inputSource] = await Promise.all([
+              fs.stat(inputPath),
+              fs.readFile(inputPath, "utf8"),
+            ]);
+            inputMode = inputStat.mode & 0o777;
+            inputContainsCr = inputSource.includes("\r");
+            inputHasShebang = inputSource.startsWith("#!");
+            await Promise.all([
+              fs.writeFile(args[args.indexOf("--cidfile") + 1] ?? "", "b".repeat(64)),
+              fs.writeFile(join(workDir, SANDBOX_OUTPUT_FILE), Buffer.from("%PDF-1.7")),
+            ]);
+            child.emit("close", 0, null);
+          })().catch((error: unknown) => {
+            child.emit("error", error instanceof Error ? error : new Error("fake failure"));
+          });
         });
         return child;
       },
     });
-    const { artifacts } = fakeArtifacts(async () => {
+    const { artifacts, uploadArtifact } = fakeArtifacts(async () => {
       throw new Error("upload boom");
     });
 
@@ -233,6 +258,14 @@ describe("processCompileJob", () => {
     });
 
     expect(outcome).toEqual({ status: "failed", error: "UPLOAD_FAILED" });
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0]?.command).toBe("docker");
+    expect(spawnCalls[0]?.shell).toBe(false);
+    expect(spawnCalls[0]?.args).toContain("124:125");
+    expect(uploadArtifact).toHaveBeenCalledTimes(1);
+    expect(inputMode & 0o111).toBe(0);
+    expect(inputContainsCr).toBe(false);
+    expect(inputHasShebang).toBe(false);
     expect(dirs.length).toBe(1);
     const stat = await fs.stat(dirs[0]!).catch(() => null);
     expect(stat).toBeNull();
