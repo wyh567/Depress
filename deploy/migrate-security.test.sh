@@ -8,10 +8,14 @@ fi
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 readonly MIGRATE_SCRIPT="${SCRIPT_DIR}/migrate.sh"
+readonly IDENTITY_RUNNER="${SCRIPT_DIR}/run-as-identity.sh"
+# shellcheck disable=SC1090
+source "$IDENTITY_RUNNER"
 readonly TEST_USER="depress-migtest-$$"
 readonly TEST_GROUP="$TEST_USER"
 readonly ALT_GROUP="${TEST_GROUP}x"
 SANDBOX=$(mktemp -d /var/tmp/depress-migrate-test.XXXXXX)
+OPERATOR_CWD=$(mktemp -d /root/depress-migrate-operator-cwd.XXXXXX)
 test_user_created=0
 test_group_created=0
 alt_group_created=0
@@ -36,6 +40,10 @@ cleanup() {
   if [[ -n ${SANDBOX:-} && -d ${SANDBOX} &&
     ${SANDBOX} == /var/tmp/depress-migrate-test.* ]]; then
     rm -rf -- "${SANDBOX}"
+  fi
+  if [[ -n ${OPERATOR_CWD:-} && -d ${OPERATOR_CWD} && ! -L ${OPERATOR_CWD} &&
+    ${OPERATOR_CWD} == /root/depress-migrate-operator-cwd.* ]]; then
+    rmdir "$OPERATOR_CWD"
   fi
   exit "$status"
 }
@@ -128,9 +136,12 @@ expect_runtime_rejection() {
 
 write_migration_env "DATABASE_URL=${DATABASE_URL_MARKER}"
 [[ "$(stat -c '%U:%G:%a' "${ENV_DIR}")" == "root:root:711" ]]
-runuser -u "${TEST_USER}" -- test -x "${ENV_DIR}"
-runuser -u "${TEST_USER}" -- test ! -r "${ENV_DIR}"
-runuser -u "${TEST_USER}" -- test -r "${MIGRATION_ENV_FILE}"
+chmod 0700 "$OPERATOR_CWD"
+cd "$OPERATOR_CWD"
+[[ "$(run_as_identity_from_safe_cwd "$TEST_USER" /bin/pwd)" == / ]]
+run_as_identity_from_safe_cwd "$TEST_USER" /usr/bin/test -x "${ENV_DIR}"
+run_as_identity_from_safe_cwd "$TEST_USER" /usr/bin/test ! -r "${ENV_DIR}"
+run_as_identity_from_safe_cwd "$TEST_USER" /usr/bin/test -r "${MIGRATION_ENV_FILE}"
 run_migration >"${SANDBOX}/first.log" 2>&1
 [[ -f "${RESULT_DIR}/executed" ]]
 [[ "$(stat -c '%U:%G:%a' "$RUNTIME_DIR")" == "${TEST_USER}:${TEST_GROUP}:700" ]]
@@ -147,13 +158,13 @@ run_migration >"${SANDBOX}/repeat.log" 2>&1
 ! grep -R -F -- "$DATABASE_URL_MARKER" "$RUNTIME_DIR" "${SANDBOX}/repeat.log"
 echo "PASS: a safe existing runtime and tool cache can be reused"
 
-if runuser -u "$TEST_USER" -- env \
+if run_as_identity_from_safe_cwd "$TEST_USER" /usr/bin/env \
   DEPRESS_ROOT="$DEPRESS_ROOT" \
   MIGRATION_ENV_FILE="$MIGRATION_ENV_FILE" \
   MIGRATION_USER="$TEST_USER" \
   MIGRATION_RUNTIME_DIR="$RUNTIME_DIR" \
   COREPACK_BIN="$FAKE_COREPACK" \
-  bash "$MIGRATE_SCRIPT" >"${SANDBOX}/non-root.log" 2>&1; then
+  /bin/bash "$MIGRATE_SCRIPT" >"${SANDBOX}/non-root.log" 2>&1; then
   echo "migration security test failed: non-root invocation was accepted" >&2
   exit 1
 fi

@@ -13,9 +13,19 @@ fi
 
 SOURCE_DIR=$(realpath "$1")
 COMMIT_SHA=$2
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DEPRESS_ROOT=${DEPRESS_ROOT:-/opt/depress}
+DEPRESS_RELEASE_GROUP=${DEPRESS_RELEASE_GROUP:-depress-release}
 SYSTEMCTL_BIN=${SYSTEMCTL_BIN:-systemctl}
 COREPACK_BIN=${COREPACK_BIN:-/usr/bin/corepack}
+HEALTH_CHECK_BIN=${HEALTH_CHECK_BIN:-${SOURCE_DIR:-}/deploy/health-check.sh}
+RELEASE_PERMISSIONS_BIN=${RELEASE_PERMISSIONS_BIN:-${SCRIPT_DIR}/release-permissions.sh}
+readonly -a SERVICE_UNITS=(
+  depress-api
+  depress-outbox
+  depress-pointer-worker
+  depress-web
+)
 
 if [[ ! ${COMMIT_SHA} =~ ^[0-9a-f]{40}$ ]]; then
   echo "commit SHA must be exactly 40 lowercase hexadecimal characters" >&2
@@ -48,7 +58,16 @@ RELEASE_DIR="${RELEASES_DIR}/${COMMIT_SHA}"
 STAGING_DIR="${RELEASES_DIR}/.${COMMIT_SHA}.staging"
 CURRENT_LINK="${DEPRESS_ROOT}/current"
 PREVIOUS_LINK="${DEPRESS_ROOT}/previous"
-install -d -o root -g root -m 0755 "${DEPRESS_ROOT}" "${RELEASES_DIR}"
+getent group "${DEPRESS_RELEASE_GROUP}" >/dev/null 2>&1 || {
+  echo "missing release group ${DEPRESS_RELEASE_GROUP}" >&2
+  exit 1
+}
+[[ -f "${RELEASE_PERMISSIONS_BIN}" && ! -L "${RELEASE_PERMISSIONS_BIN}" ]] || {
+  echo "release permission helper is missing or a symlink" >&2
+  exit 1
+}
+install -d -o root -g "${DEPRESS_RELEASE_GROUP}" -m 0750 \
+  "${DEPRESS_ROOT}" "${RELEASES_DIR}"
 if [[ -e "${RELEASE_DIR}" || -e "${STAGING_DIR}" ]]; then
   echo "release already exists or has an incomplete staging directory" >&2
   exit 1
@@ -61,7 +80,7 @@ if [[ (-e "${PREVIOUS_LINK}" || -L "${PREVIOUS_LINK}") && ! -L "${PREVIOUS_LINK}
   echo "previous must be a symlink or absent" >&2
   exit 1
 fi
-install -d -o root -g root -m 0755 "${STAGING_DIR}"
+install -d -o root -g "${DEPRESS_RELEASE_GROUP}" -m 0750 "${STAGING_DIR}"
 ARCHIVE_FILE=
 
 cleanup() {
@@ -88,27 +107,48 @@ printf '%s\n' "${COMMIT_SHA}" > "${STAGING_DIR}/.depress-release"
 
 (
   cd "${STAGING_DIR}"
-  "${COREPACK_BIN}" pnpm install --frozen-lockfile
+  "${COREPACK_BIN}" pnpm install --frozen-lockfile \
+    --package-import-method=copy
   : "${DEPRESS_API_ORIGIN:?DEPRESS_API_ORIGIN is required for the Web build}"
   "${COREPACK_BIN}" pnpm build
 )
 
-chown -R root:root "${STAGING_DIR}"
-chmod -R go-w "${STAGING_DIR}"
+DEPRESS_ROOT="${DEPRESS_ROOT}" \
+DEPRESS_RELEASE_GROUP="${DEPRESS_RELEASE_GROUP}" \
+  bash "${RELEASE_PERMISSIONS_BIN}" normalize "${STAGING_DIR}"
 mv "${STAGING_DIR}" "${RELEASE_DIR}"
 trap - EXIT
+DEPRESS_ROOT="${DEPRESS_ROOT}" \
+DEPRESS_RELEASE_GROUP="${DEPRESS_RELEASE_GROUP}" \
+  bash "${RELEASE_PERMISSIONS_BIN}" verify "${RELEASE_DIR}"
 
 HAD_CURRENT=0
 HAD_PREVIOUS=0
 OLD_CURRENT_TARGET=
 OLD_PREVIOUS_TARGET=
+assert_release_target() {
+  local target=$1
+  local releases_real resolved
+
+  releases_real=$(realpath -e -- "${RELEASES_DIR}")
+  resolved=$(realpath -e -- "$target") || return 1
+  [[ -d "$resolved" && "$(dirname -- "$resolved")" == "$releases_real" ]]
+}
 if [[ -L "${CURRENT_LINK}" ]]; then
   HAD_CURRENT=1
   OLD_CURRENT_TARGET=$(readlink -f "${CURRENT_LINK}")
+  assert_release_target "${OLD_CURRENT_TARGET}" || {
+    echo "current target escapes the releases directory" >&2
+    exit 1
+  }
 fi
 if [[ -L "${PREVIOUS_LINK}" ]]; then
   HAD_PREVIOUS=1
   OLD_PREVIOUS_TARGET=$(readlink -f "${PREVIOUS_LINK}")
+  assert_release_target "${OLD_PREVIOUS_TARGET}" || {
+    echo "previous target escapes the releases directory" >&2
+    exit 1
+  }
 fi
 
 restore_link() {
@@ -131,6 +171,21 @@ restore_activation() {
   rm -f -- "${CURRENT_LINK}.new" "${PREVIOUS_LINK}.new"
 }
 
+restart_all_services() {
+  local unit
+  for unit in "${SERVICE_UNITS[@]}"; do
+    "${SYSTEMCTL_BIN}" restart "${unit}"
+  done
+}
+
+run_release_health_check() {
+  [[ -x "${HEALTH_CHECK_BIN}" ]] || {
+    echo "health check is missing or not executable: ${HEALTH_CHECK_BIN}" >&2
+    return 1
+  }
+  "${HEALTH_CHECK_BIN}"
+}
+
 ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}.new"
 if [[ "${HAD_CURRENT}" == "1" ]]; then
   ln -sfn "${OLD_CURRENT_TARGET}" "${PREVIOUS_LINK}.new"
@@ -148,11 +203,12 @@ if ! {
 fi
 
 if ! "${SYSTEMCTL_BIN}" daemon-reload ||
-  ! "${SYSTEMCTL_BIN}" restart depress-api depress-outbox depress-pointer-worker; then
+  ! restart_all_services ||
+  ! run_release_health_check; then
   restore_activation
   if [[ "${HAD_CURRENT}" == "1" ]]; then
     "${SYSTEMCTL_BIN}" daemon-reload || true
-    "${SYSTEMCTL_BIN}" restart depress-api depress-outbox depress-pointer-worker || true
+    restart_all_services || true
   fi
   echo "service action failed; current and previous were restored" >&2
   exit 1

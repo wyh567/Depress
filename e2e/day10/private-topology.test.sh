@@ -60,6 +60,10 @@ for identity in "${day10_private_groups[@]}"; do
     exit 71
   }
 done
+! getent group "$day10_release_group" >/dev/null 2>&1 || {
+  echo "topology test refuses a pre-existing release group" >&2
+  exit 71
+}
 
 install -d -m 0755 "$DAY10_SYSTEMD_UNIT_DIR"
 printf '%s\n' \
@@ -83,7 +87,8 @@ register_migration_runtime
 
 install -d -o "$day10_migration_user" -g "$day10_migration_group" \
   -m 0700 "$migration_runtime"
-runuser -u "$day10_migration_user" -- touch "${migration_runtime}/cache-probe"
+run_as_identity_from_safe_cwd "$day10_migration_user" \
+  /usr/bin/touch "${migration_runtime}/cache-probe"
 [[ "$(stat -c '%U:%G:%a' "$migration_runtime")" == "${day10_migration_user}:${day10_migration_group}:700" ]]
 [[ "$(stat -c '%U:%G:%a' "$migration_runtime_state_file")" == "root:root:600" ]]
 
@@ -104,10 +109,26 @@ grep -Fxq "Group=${day10_worker_group}" \
   "${DAY10_SYSTEMD_UNIT_DIR}/depress-pointer-worker.service"
 grep -Fxq "SupplementaryGroups=${day10_docker_group}" \
   "${DAY10_SYSTEMD_UNIT_DIR}/depress-pointer-worker.service"
+grep -Fxq "User=${day10_web_user}" \
+  "${DAY10_SYSTEMD_UNIT_DIR}/depress-web-day10.service"
+grep -Fxq "Group=${day10_web_group}" \
+  "${DAY10_SYSTEMD_UNIT_DIR}/depress-web-day10.service"
+grep -Fxq "EnvironmentFile=/etc/depress-day10/web.env" \
+  "${DAY10_SYSTEMD_UNIT_DIR}/depress-web-day10.service"
+grep -Fxq "ReadOnlyPaths=/opt/depress" \
+  "${DAY10_SYSTEMD_UNIT_DIR}/depress-web-day10.service"
+[[ "$(readlink "${DAY10_SYSTEMD_UNIT_DIR}/depress-web.service")" == \
+  "depress-web-day10.service" ]]
 ! grep -q '^SupplementaryGroups=' \
   "${DAY10_SYSTEMD_UNIT_DIR}/depress-api.service"
 ! grep -q '^SupplementaryGroups=' \
   "${DAY10_SYSTEMD_UNIT_DIR}/depress-outbox.service"
+! grep -q '^SupplementaryGroups=' \
+  "${DAY10_SYSTEMD_UNIT_DIR}/depress-web-day10.service"
+for identity in "${day10_private_users[@]}"; do
+  [[ " $(id -nG "$identity") " == *" ${day10_release_group} "* ]]
+  [[ "$(id -gn "$identity")" == "$identity" ]]
+done
 
 DEPRESS_ENV_DIR="$config_dir" \
   DEPRESS_API_USER="$day10_api_user" \
@@ -118,8 +139,12 @@ DEPRESS_ENV_DIR="$config_dir" \
   DEPRESS_WORKER_GROUP="$day10_worker_group" \
   DEPRESS_MIGRATION_USER="$day10_migration_user" \
   DEPRESS_MIGRATION_GROUP="$day10_migration_group" \
+  DEPRESS_WEB_USER="$day10_web_user" \
+  DEPRESS_WEB_GROUP="$day10_web_group" \
+  DEPRESS_RELEASE_GROUP="$day10_release_group" \
   DEPRESS_DOCKER_GROUP="$day10_docker_group" \
   DEPRESS_WORKER_ENV_FILE="${config_dir}/worker.env" \
+  DEPRESS_WEB_ENV_FILE="${config_dir}/web.env" \
   bash "${SCRIPT_DIR}/../../deploy/verify-env-permissions.sh" \
   > "${SANDBOX}/permission-evidence.log"
 grep -Fxq "env_permission_matrix=PASS" \
@@ -137,6 +162,7 @@ remove_day10_private_identities
 for identity in "${day10_private_users[@]}"; do
   ! id "$identity" >/dev/null 2>&1
 done
+! getent group "$day10_release_group" >/dev/null 2>&1
 
 echo "PASS: disposable users, private groups, env permissions, and units agree"
 echo "PASS: unmarked pre-existing migration runtime is rejected"

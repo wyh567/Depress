@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 User=depress-outbox
 Group=depress-outbox
+SupplementaryGroups=depress-release
 WorkingDirectory=/opt/depress/current
 EnvironmentFile=/etc/depress/outbox.env
 ExecStart=/usr/bin/corepack pnpm --dir /opt/depress/current --filter @depress/api start:outbox

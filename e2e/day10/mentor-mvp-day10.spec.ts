@@ -894,7 +894,16 @@ test.describe("Day 10 signup/auth preflight", () => {
     await acceptanceCase("D10-PREFLIGHT-001", "exact release and process topology", async () => {
       evidence.topology = control("topology");
       expect(evidence.topology).toContain(`release=${EXACT_COMMIT}`);
+      if (process.env.DAY10_VALIDATION_TYPE === "NON_CANDIDATE_DIRTY_TREE_VALIDATION") {
+        expect(evidence.topology).toContain(
+          "validation_type=NON_CANDIDATE_DIRTY_TREE_VALIDATION"
+        );
+        expect(evidence.topology).toContain(
+          "release_source=NON_CANDIDATE_DIRTY_TREE_BUNDLE"
+        );
+      }
       expect(evidence.topology).toContain("depress-web-day10.service");
+      expect(evidence.topology).toContain("depress-day10-web");
       expect(evidence.topology).toContain("depress-api.service");
       expect(evidence.topology).toContain("depress-outbox.service");
       expect(evidence.topology).toContain("depress-pointer-worker.service");
@@ -1208,7 +1217,16 @@ test.describe("Day 10 full technical acceptance", () => {
         await acceptanceCase("D10-001", "exact release and process topology", async () => {
           evidence.topology = control("topology");
           expect(evidence.topology).toContain(`release=${EXACT_COMMIT}`);
+          if (process.env.DAY10_VALIDATION_TYPE === "NON_CANDIDATE_DIRTY_TREE_VALIDATION") {
+            expect(evidence.topology).toContain(
+              "validation_type=NON_CANDIDATE_DIRTY_TREE_VALIDATION"
+            );
+            expect(evidence.topology).toContain(
+              "release_source=NON_CANDIDATE_DIRTY_TREE_BUNDLE"
+            );
+          }
           expect(evidence.topology).toContain("depress-web-day10.service");
+          expect(evidence.topology).toContain("depress-day10-web");
           expect(evidence.topology).toContain("depress-api.service");
           expect(evidence.topology).toContain("depress-outbox.service");
           expect(evidence.topology).toContain("depress-pointer-worker.service");

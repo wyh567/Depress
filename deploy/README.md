@@ -1,164 +1,184 @@
-# DePress Day 9 deployment and recovery runbook
+# DePress single-VM production deployment
 
-This package targets a Vercel-compatible Next.js Web and one private Linux VM.
-The VM runs three distinct systemd identities: `depress-api`,
-`depress-outbox`, and `depress-worker`, each with a matching private primary
-group. A fourth non-login identity, `depress-migration`, runs only explicit
-migrations. Only `depress-worker` belongs to the host `docker` group.
-PostgreSQL, Redis, S3-compatible storage, and the Docker socket must not listen
-on a public interface.
+This package targets one Ubuntu Linux VM running the Next.js Web, Fastify API,
+Outbox, Pointer Worker, and explicit Migration entrypoint. nginx is the only
+public application boundary:
+
+```text
+Internet
+  -> nginx :443 (HTTP :80 redirects; ACME challenge is allowed)
+     /api/* -> 127.0.0.1:3001 (Fastify API)
+     /*     -> 127.0.0.1:3000 (Next.js Web)
+```
+
+PostgreSQL, Redis, S3-compatible storage, and the Docker socket remain private.
+The Worker is the only DePress identity allowed to use Docker.
 
 ## Runtime commands
 
-| Process        | Exact command                                     | Startup validation/readiness                                            |
-| -------------- | ------------------------------------------------- | ----------------------------------------------------------------------- |
-| Web build      | `pnpm --filter @depress/web build`                | `DEPRESS_API_ORIGIN` is required in production                          |
-| API            | `pnpm --filter @depress/api start:api`            | configuration and S3 shape at boot; `/health/ready` checks DB and Redis |
-| Outbox         | `pnpm --filter @depress/api start:outbox`         | configuration at boot; systemd `active` plus safe startup log           |
-| Pointer Worker | `pnpm --filter @depress/api start:pointer-worker` | configuration, Docker reconciliation, S3 shape, then safe startup log   |
-| Migration      | `pnpm --filter @depress/api db:migrate`           | PostgreSQL only; never called by API startup                            |
+| Process | Exact command | Identity | Environment |
+| --- | --- | --- | --- |
+| Web build | `corepack pnpm --filter @depress/web build` | root during build | `DEPRESS_API_ORIGIN=http://127.0.0.1:3001` |
+| Web | `corepack pnpm --dir /opt/depress/current --filter @depress/web start --hostname 127.0.0.1 --port 3000` | `depress-web` | `/etc/depress/web.env` |
+| API | `corepack pnpm --dir /opt/depress/current --filter @depress/api start:api` | `depress-api` | `/etc/depress/api.env` |
+| Outbox | `corepack pnpm --dir /opt/depress/current --filter @depress/api start:outbox` | `depress-outbox` | `/etc/depress/outbox.env` |
+| Pointer Worker | `corepack pnpm --dir /opt/depress/current --filter @depress/api start:pointer-worker` | `depress-worker` | `/etc/depress/pointer-worker.env` |
+| Migration | `corepack pnpm --dir /opt/depress/current --filter @depress/api db:migrate` | `depress-migration` | `/etc/depress/migration.env` |
 
-## Environment contract
+The public browser path is same-origin. Web clients use relative `/api/*`
+URLs. The nginx API location is the sole public `/api/*` proxy. The existing
+Next rewrite remains a loopback-only fallback for a direct, non-public Web
+request and points at `DEPRESS_API_ORIGIN`; it cannot loop through nginx.
 
-S = secret, N = non-secret, R = production-required, O = optional.
+## Identities and environment files
 
-| Variable                                    | Owner                          | Class | Default / notes                                                                    |
-| ------------------------------------------- | ------------------------------ | ----- | ---------------------------------------------------------------------------------- |
-| `DEPRESS_API_ORIGIN`                        | Web build                      | N/R   | none; server-only same-origin rewrite destination                                  |
-| `PUBLIC_ORIGIN`                             | API                            | N/R   | local `http://localhost:3000`                                                      |
-| `AUTH_ORIGIN`                               | API                            | N/R   | Better Auth base/trusted origin; local Web origin                                  |
-| `BETTER_AUTH_SECRET`                        | API                            | S/R   | none; at least 32 characters                                                       |
-| `DATABASE_URL`                              | API, outbox, Worker, migration | S/R   | none; use least-privilege credentials per process                                  |
-| `REDIS_URL`                                 | API, outbox, Worker            | S/R   | local compatibility uses `REDIS_HOST=localhost`, `REDIS_PORT=6379`                 |
-| `S3_ENDPOINT`                               | API, Worker                    | N/O   | omit for provider default; private URL for compatible storage                      |
-| `S3_REGION` / `S3_BUCKET`                   | API, Worker                    | N/R   | none                                                                               |
-| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | API, Worker                    | S/R   | separate read/sign and write identities where supported                            |
-| `API_BIND_HOST` / `API_PORT`                | API                            | N/O   | `127.0.0.1` / `3001`                                                               |
-| `OUTBOX_BATCH_SIZE`                         | outbox                         | N/O   | `25`, bounded 1–100                                                                |
-| `OUTBOX_POLL_INTERVAL_MS`                   | outbox                         | N/O   | `1000`, bounded 100–60000 ms                                                       |
-| `POINTER_WORKER_CONCURRENCY`                | Worker                         | N/O   | `1`, bounded 1–16                                                                  |
-| `TYPST_IMAGE`                               | Worker                         | N/O   | exact code-pinned digest only; any other value fails boot                          |
-| `TYPST_FONT_PATH`                           | Worker                         | N/O   | bundled release font directory; absolute host path override for equivalent layouts |
-| `LOG_LEVEL`                                 | API, outbox, Worker            | N/O   | `info`                                                                             |
-| `CROSSREF_MAILTO`                           | API                            | N/O   | none                                                                               |
-
-`TYPST_IMAGE` accepts only the code-owned
-`ghcr.io/typst/typst@sha256:...` digest; an unset value uses that same pin and
-any other value fails boot. `TYPST_FONT_PATH` defaults to the directory derived
-from the root-owned release and is mounted read-only; its override exists only
-for an equivalent host-visible layout. A request, document, or queue item
-cannot change either identity.
-
-## First installation and release
-
-1. Install Node 22+, Corepack, pnpm 9, Git, tar, nginx, Docker, and systemd.
-2. Create `depress-api`, `depress-outbox`, `depress-worker`, and
-   `depress-migration` as non-login system users. Give each identity a matching
-   private primary group (`depress-api`, `depress-outbox`, `depress-worker`,
-   `depress-migration`). Add only `depress-worker` to `docker`; do not add the
-   API, outbox, or migration identities to that group. On a new host,
-   `useradd --system --user-group --no-create-home --shell /usr/sbin/nologin
-   <name>` creates the required private group and user together.
-3. Install the unit templates and nginx template as root. Create the
-   environment directory as a real root-owned directory, not a symlink:
-
-   ```bash
-   sudo test ! -L /etc/depress
-   sudo install -d -o root -g root -m 0711 /etc/depress
-   ```
-
-   Mode `0711` lets a service traverse a known environment-file path without
-   granting directory listing. The private group and `0640` mode on each file
-   remain the read boundary. Do not use `0750 root:root`: service identities
-   would be unable to traverse the directory and read even their own file.
-4. Provision TLS files outside the repository under a separate strict
-   subdirectory. The traversable environment directory does not relax private
-   key permissions:
-
-   ```bash
-   sudo test ! -L /etc/depress/tls
-   sudo install -d -o root -g root -m 0700 /etc/depress/tls
-   sudo chmod 0600 /etc/depress/tls/privkey.pem
-   ```
-
-5. Create the four process-specific `/etc/depress/*.env` files from the
-   example. Apply these exact owners and modes:
-
-   | File | Owner | Mode |
-   | ---- | ----- | ---- |
-   | `/etc/depress/api.env` | `root:depress-api` | `0640` |
-   | `/etc/depress/outbox.env` | `root:depress-outbox` | `0640` |
-   | `/etc/depress/pointer-worker.env` | `root:depress-worker` | `0640` |
-   | `/etc/depress/migration.env` | `root:depress-migration` | `0640` |
-
-   The private groups are an access boundary: never add another runtime
-   identity to them. The root-started migration script drops privileges first;
-   only then does `depress-migration` read its root-owned, non-writable file.
-   That file must contain exactly one non-empty `DATABASE_URL=...` line.
-   `depress-migration` remains a non-login identity without a home directory.
-   `migrate.sh` creates or reuses `/run/depress-migration` as its private
-   `HOME`, Corepack home, and cache root. The directory and its cache
-   subdirectories are `depress-migration:depress-migration` mode `0700`; an
-   existing path with different metadata or any symlink fails closed. This
-   runtime contains only package-manager cache and non-sensitive runtime files,
-   never `DATABASE_URL`. It may be recreated after `/run` is cleared on reboot.
-   The migration identity can read, but cannot modify, the root-owned
-   `migration.env`, and it must not belong to the `docker` group.
-6. From a clean checkout of the exact commit, run
-   `sudo DEPRESS_API_ORIGIN=https://<api-origin> bash deploy/release.sh "$PWD" "$(git rev-parse HEAD)"`.
-7. Run `sudo bash deploy/migrate.sh` explicitly, then
-   `bash deploy/health-check.sh`.
-   Migrations are idempotent and are never coupled to API boot.
-
-Before enabling or restarting services, run
-`sudo bash deploy/verify-env-permissions.sh`. It verifies ownership, modes,
-cross-service denial, the migration boundary, and that Docker membership is
-limited to the Worker. It never prints environment-file contents.
-The core read checks are equivalent to:
+Create five independent system identities with private primary groups:
 
 ```bash
-sudo -u depress-api test -r /etc/depress/api.env
-sudo -u depress-api test ! -r /etc/depress/pointer-worker.env
-sudo -u depress-worker test -r /etc/depress/pointer-worker.env
-sudo -u depress-worker test ! -r /etc/depress/api.env
-sudo -u depress-outbox test -r /etc/depress/outbox.env
-sudo -u depress-outbox test ! -r /etc/depress/api.env
-sudo -u depress-migration test -r /etc/depress/migration.env
+sudo groupadd --system depress-release
+sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin depress-web
+sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin depress-api
+sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin depress-outbox
+sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin depress-worker
+sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin depress-migration
+sudo usermod -aG depress-release depress-web
+sudo usermod -aG depress-release depress-api
+sudo usermod -aG depress-release depress-outbox
+sudo usermod -aG depress-release depress-worker
+sudo usermod -aG depress-release depress-migration
+sudo usermod -aG docker depress-worker
 ```
 
-Releases are immutable, root-owned directories at
-`/opt/depress/releases/<commit-sha>`. `/opt/depress/current` is an atomic
-symlink; `/opt/depress/previous` records the prior target. Runtime identities
-have no write path under `/opt/depress`. `release.sh` rejects any staged,
-modified, or untracked source file, then builds from `git archive` of the exact
-40-character HEAD commit. Ignored local files and build outputs therefore
-cannot enter a release.
+All five identities retain their private primary groups and receive only the
+supplemental `depress-release` group for immutable program reads. That group
+must never own an environment file or Secret. Only the Worker may additionally
+belong to `docker`. The Web identity has no database,
+Redis, S3, Auth, migration, or Docker credentials and reads only
+`/etc/depress/web.env`.
 
-## Restart, rollback, and recovery
+```bash
+sudo test ! -L /etc/depress
+sudo install -d -o root -g root -m 0711 /etc/depress
+```
 
-Normal restart:
-`sudo systemctl restart depress-api depress-outbox depress-pointer-worker`.
-Confirm `systemctl is-active` for all three, then run the health script.
-Outbox and Worker readiness is `active` state plus the safe startup messages;
-the Worker message occurs only after Docker reconciliation.
+Use `deploy/env.production.example` to create the five root-owned files. Each
+file is `root:<matching-private-group>` with mode `0640`; `web.env` contains
+only:
 
-Rollback the immediately prior code release with
-`sudo bash deploy/rollback.sh`, or name a known commit with
-`sudo bash deploy/rollback.sh <commit-sha>`. Database
-migrations do not roll back automatically. Before release, verify migration
-backward compatibility; otherwise restore PostgreSQL from a tested backup
-under an explicit incident plan. After rollback, recheck all service states,
-health, and journal logs.
+```text
+NODE_ENV=production
+HOSTNAME=127.0.0.1
+PORT=3000
+NEXT_TELEMETRY_DISABLED=1
+DEPRESS_API_ORIGIN=http://127.0.0.1:3001
+```
 
-If readiness fails, keep the API out of rotation, inspect root-only service
-journals, verify private dependency reachability, and restart only after the
-cause is corrected. Never paste environment files, URLs, bucket names, Docker
-metadata, or raw internal errors into public diagnostics.
+Run `sudo bash deploy/verify-env-permissions.sh` before enabling services. It
+checks positive reads, all cross-file denials, private groups, the non-listable
+`0711` directory boundary, and Worker-only Docker membership without printing
+environment contents.
 
-## Public surface
+All deployment-layer privilege drops use `deploy/run-as-identity.sh`. It
+changes to `/` before executing an absolute command with a minimal trusted
+environment, so a service identity never inherits a root-only operator cwd.
 
-The nginx template terminates HTTPS and forwards only `/api/*`,
-`/health/live`, and `/health/ready` to the loopback API. It preserves Host,
-forwarded host/proto, cookies, and `Set-Cookie`; bounds body size and timeouts;
-and returns 404 for `/compile`, `/jobs/*`, internal Worker/outbox prefixes, and
-all other paths. Redis, PostgreSQL, S3/MinIO, and Docker have no proxy route.
+## Immutable releases
+
+`release.sh` accepts only a clean worktree and an exact 40-character HEAD SHA.
+It builds Web and the backend from a `git archive` of that SHA. Dependency
+installation forces pnpm's copy import method so permission normalization
+cannot mutate or inherit a hard-linked global store. Before activation,
+`release-permissions.sh` rejects dangling, looping, escaping, or hard-linked
+runtime files, then enforces `root:depress-release`: `0750` on parents and
+directories, `0640` on ordinary files, and `0750` only on files that were
+already executable. All five identities must read and traverse the Release and
+must be unable to write it. Only then is `.depress-release` finalized and
+`current`/`previous` switched atomically.
+
+The service restart order is API, Outbox, Worker, Web. The API is restarted
+first so the Web's loopback API origin is available; the asynchronous services
+then start from the same `current` symlink, and Web starts last. Migration is
+never implicit. A restart or health failure restores both symlinks and
+restarts all four services on the former release. `rollback.sh` uses the same
+four-service transaction. Release directories are never writable by runtime
+identities.
+
+The Web unit uses systemd `StateDirectory` and `CacheDirectory` at
+`/var/lib/depress-web` and `/var/cache/depress-web`, both private `0700`
+directories. This keeps any Next runtime cache outside the immutable release;
+the Web has no write path under `/opt/depress`. Its address-family sandbox adds
+only `AF_NETLINK` beyond loopback networking because Next.js reads interface
+metadata through Node's `os.networkInterfaces()` during startup.
+
+`deploy/systemd/verify-depress-web-unit.sh` verifies the production Web unit
+with the exact target systemd major and a replacement `SYSTEMD_UNIT_PATH` that
+contains only `depress-web.service`, `sysinit.target`, and
+`network-online.target`. It requires both a zero analyzer exit status and an
+empty analyzer diagnostic log. Host package units therefore cannot enter the
+static verification graph, while any warning or error from the target unit or
+the two controlled stubs still fails closed. The validator separately checks
+the exact `ExecStart`, `WorkingDirectory`, and `EnvironmentFile` contract and
+their filesystem objects before installing the unit.
+
+## nginx and health checks
+
+Install `deploy/nginx/depress-api.conf` in the nginx `http` context. It
+provides an HTTP-to-HTTPS redirect, ACME challenge support, the TLS virtual
+host for `de-press.xyz`, same-origin `/api/*`, and the Web root. It forwards
+Host, X-Forwarded-Host, X-Forwarded-Proto, X-Forwarded-For, and X-Real-IP.
+HTML, authentication, and API responses are not publicly cached; immutable
+`/_next/static/*` assets may be cached. API/PDF proxying is unbuffered with
+bounded timeouts. It does not publish ports 3000, 3001, 5432, 6379, 9000,
+9001, 2375, or 2376.
+
+`health-check.sh` accepts a testable HTTPS origin, Host header, CA file, and
+optional PDF download path through environment variables. It checks nginx
+health, the Web root and a discovered static asset, same-origin API routing,
+internal-route denial, current-release markers, active Web/API units, and an
+optional PDF response without requiring production secrets.
+
+## Day 10 production-like Harness
+
+The Harness creates the disposable `depress-day10-web` identity and matching
+group in addition to API, Outbox, Worker, and Migration. It starts the real
+production-shaped Web unit, API, Outbox, Worker, and nginx unit; browser checks
+use the nginx HTTPS root and never connect directly to port 13000. The Web
+environment points to loopback API port 13001 and contains no backend secret.
+
+Cleanup is marker- and ownership-checked. It stops the disposable units,
+removes Web runtime data, secrets, release data, configuration, the five
+disposable identities, and their private groups, and refuses to touch
+pre-existing system users or services.
+
+The full candidate flow remains the only formal exact-SHA Full Smoke. Any
+validation performed on this uncommitted worktree must be labeled
+`NON_CANDIDATE_DIRTY_TREE_VALIDATION`.
+
+## Ubuntu 22.04 and resource notes
+
+Run `bash deploy/host-preflight.sh` on the target before installation. It is
+read-only and reports the OS, systemd, CPU, RAM, swap, disk, required command
+versions, and listener state. The units use directives supported by systemd 249: `StateDirectory`,
+`CacheDirectory`, `RuntimeDirectory`, `ProtectSystem`, `ProtectHome`,
+`ReadOnlyPaths`, and `ReadWritePaths`. Node 22, Corepack/pnpm 9, nginx,
+Docker Engine, PostgreSQL, Redis, `runuser`, GNU `tar`, `readlink`, `stat`,
+`ss`, and `systemd-analyze` are host prerequisites; no installer is included.
+
+The resource gates use exact kernel values: at least 2 CPUs from `nproc`,
+`MemTotal >= 3407872 kB` from `/proc/meminfo`, at least 1610612736 bytes of
+enabled swap from `/proc/swaps`, and at least 21474836480 available bytes from
+`df -B1 -P /`. The 3.25 GiB `MemTotal` floor represents a nominal 4 GiB cloud VM:
+firmware and kernel reservations mean Linux may not see all purchased RAM. It
+still rejects a 3 GiB class or clearly undersized host. This is a total-memory
+class gate, not a current `MemAvailable` requirement; the full Smoke and
+resource sampling remain responsible for exposing OOM, swap, and pressure.
+
+On a 2 vCPU/4 GiB VM, one idle Next Web process is expected to be a modest
+additional Node resident set, but build-time Next memory is the main peak risk.
+The combined API, Web, Outbox, Worker, PostgreSQL, Redis, and S3 services may
+approach the memory limit during a PDF compile, so keep the 2 GiB swap and
+observe actual RSS before setting limits. The 40 GiB disk is primarily used by
+the OS, one or two releases, package/build artifacts, PostgreSQL/S3 data,
+Docker layers, and journals. Set bounded journald retention and an explicit
+release-retention policy during host operations; this package does not delete
+operator-owned releases automatically.

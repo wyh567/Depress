@@ -2,10 +2,13 @@
 set -Eeuo pipefail
 umask 077
 
+readonly script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly repo_root="$(cd "${script_dir}/../.." && pwd)"
+
 # shellcheck disable=SC1091
-source /mnt/d/depress/e2e/day10/candidate-gate.sh
+source "${script_dir}/candidate-gate.sh"
 # shellcheck disable=SC1091
-source /mnt/d/depress/e2e/day10/identity-topology.sh
+source "${script_dir}/identity-topology.sh"
 
 readonly runner_mode="${1:-}"
 readonly exact_commit="${2:-}"
@@ -13,12 +16,26 @@ readonly expected_parent="${3:-}"
 readonly source_dir="${4:-}"
 readonly residue_classification="${5:-}"
 readonly approved_changed_files_file="${DAY10_EXPECTED_CHANGED_FILES_FILE:-}"
+readonly validation_type="${DAY10_VALIDATION_TYPE:-EXACT_CANDIDATE}"
+readonly validation_bundle_sha256="${DAY10_BUNDLE_SHA256:-}"
+readonly validation_changed_sha256_file="${DAY10_CHANGED_SHA256_FILE:-}"
+readonly validation_source_archive="${DAY10_SOURCE_ARCHIVE:-}"
+readonly validation_source_archive_sha256="${DAY10_SOURCE_ARCHIVE_SHA256:-}"
 readonly source_branch="feature/phase4-mentor-mvp"
-readonly staging_root="/mnt/d/depress-day10-wsl"
+readonly staging_root="${DAY10_STAGING_ROOT:-/mnt/d/depress-day10-wsl}"
 readonly release_archive="${staging_root}/release-${exact_commit}.tar"
 readonly release_root="/opt/depress"
 readonly release_dir="${release_root}/releases/${exact_commit}"
+readonly rollback_release_id="$(
+  if [[ "${exact_commit:0:1}" == "0" ]]; then
+    printf '1%s' "${exact_commit:1}"
+  else
+    printf '0%s' "${exact_commit:1}"
+  fi
+)"
+readonly rollback_release_dir="${release_root}/releases/${rollback_release_id}"
 readonly current_link="${release_root}/current"
+readonly previous_link="${release_root}/previous"
 readonly config_dir="/etc/depress-day10"
 readonly state_root="/var/lib/depress-day10"
 readonly postgres_state_file="${state_root}/postgres-harness.state"
@@ -46,13 +63,13 @@ readonly identity_state_file="${state_root}/identities-${run_id}.state"
 readonly run_log_limit_bytes=$((16 * 1024 * 1024))
 
 # shellcheck disable=SC1091
-source /mnt/d/depress/e2e/day10/provision-staging.sh
+source "${script_dir}/provision-staging.sh"
 
 readonly -a app_units=(
-  "depress-web-day10.service"
   "depress-api.service"
   "depress-outbox.service"
   "depress-pointer-worker.service"
+  "depress-web-day10.service"
   "depress-nginx-day10.service"
 )
 readonly -a infrastructure_units=(
@@ -185,7 +202,7 @@ handle_err() {
 
 is_allowed_cleanup_path() {
   case "$1" in
-    "$release_dir"|"$redis_data"|"$minio_data"|"$mc_config"|"$worker_runtime"|"$migration_runtime"|"$log_dir"|"$artifact_dir"|"$test_results_dir")
+    "$release_dir"|"$rollback_release_dir"|"$redis_data"|"$minio_data"|"$mc_config"|"$worker_runtime"|"$day10_web_runtime"|"$migration_runtime"|"$log_dir"|"$artifact_dir"|"$test_results_dir")
       return 0
       ;;
     *)
@@ -210,8 +227,19 @@ clear_directory() {
 }
 
 remove_release() {
-  if [[ -L "$current_link" && "$(readlink -f -- "$current_link")" == "$release_dir" ]]; then
+  if [[ -L "$current_link" ]] &&
+    [[ "$(readlink -f -- "$current_link")" == "$release_dir" ||
+      "$(readlink -f -- "$current_link")" == "$rollback_release_dir" ]]; then
     rm -- "$current_link"
+  fi
+  if [[ -L "$previous_link" ]] &&
+    [[ "$(readlink -f -- "$previous_link")" == "$release_dir" ||
+      "$(readlink -f -- "$previous_link")" == "$rollback_release_dir" ]]; then
+    rm -- "$previous_link"
+  fi
+  if [[ -d "$rollback_release_dir" ]]; then
+    clear_directory "$rollback_release_dir"
+    rmdir "$rollback_release_dir"
   fi
   if [[ -d "$release_dir" ]]; then
     clear_directory "$release_dir"
@@ -387,6 +415,7 @@ cleanup() {
   done
 
   clear_directory "$worker_runtime"
+  clear_directory "$day10_web_runtime"
   local migration_runtime_cleanup_complete=1
   remove_migration_runtime || migration_runtime_cleanup_complete=0
   clear_directory "$redis_data"
@@ -469,6 +498,10 @@ verify_clean() {
     echo "worker-runtime=not-clean"
     failed=1
   fi
+  if [[ -e "$day10_web_runtime" || -L "$day10_web_runtime" ]]; then
+    echo "web-runtime=present"
+    failed=1
+  fi
   if find /run -maxdepth 1 \( -type d -o -type l \) \
     -name 'depress-day10-migration-*' -print -quit 2>/dev/null | grep -q .; then
     echo "migration-runtime=present"
@@ -524,26 +557,64 @@ preflight_candidate() {
     echo "parent SHA must be exactly 40 lowercase hexadecimal characters" >&2
     return 64
   }
-  [[ -n "$source_dir" && -e "${source_dir}/.git" ]] || {
-    echo "clean source directory is required" >&2
-    return 64
-  }
+  case "$validation_type" in
+    EXACT_CANDIDATE)
+      [[ -n "$source_dir" && -e "${source_dir}/.git" ]] || {
+        echo "clean source directory is required" >&2
+        return 64
+      }
+      ;;
+    NON_CANDIDATE_DIRTY_TREE_VALIDATION)
+      [[ -n "$source_dir" && -d "$source_dir" && ! -e "${source_dir}/.git" ]] || {
+        echo "restored non-candidate source without Git metadata is required" >&2
+        return 64
+      }
+      [[ "$validation_bundle_sha256" =~ ^[0-9a-f]{64}$ ]] || {
+        echo "bundle SHA-256 must be 64 lowercase hexadecimal characters" >&2
+        return 64
+      }
+      [[ -f "$validation_changed_sha256_file" &&
+        ! -L "$validation_changed_sha256_file" &&
+        -f "$validation_source_archive" &&
+        ! -L "$validation_source_archive" &&
+        "$validation_source_archive_sha256" =~ ^[0-9a-f]{64}$ ]] || {
+        echo "external non-candidate hash manifest and source archive are required" >&2
+        return 64
+      }
+      ;;
+    *)
+      echo "unsupported validation type" >&2
+      return 64
+      ;;
+  esac
   [[ "$(readlink -m -- "$source_dir")" == "$source_dir" ]] || {
     echo "source directory must be canonical" >&2
     return 64
   }
-  [[ "$source_dir" == "${staging_root}/candidate-${exact_commit}" ]] || {
-    echo "source directory must be the exact candidate worktree" >&2
-    return 64
-  }
+  if [[ "$validation_type" == "EXACT_CANDIDATE" ]]; then
+    [[ "$source_dir" == "${staging_root}/candidate-${exact_commit}" ]] || {
+      echo "source directory must be the exact candidate worktree" >&2
+      return 64
+    }
+  else
+    [[ "$source_dir" == "${staging_root}/source-${exact_commit}" ]] || {
+      echo "source directory must be the isolated non-candidate restore" >&2
+      return 64
+    }
+  fi
   [[ "$residue_classification" != "UNKNOWN_OWNERSHIP" ]] || {
     echo "refusing rehearsal with unknown resource ownership" >&2
     return 72
   }
-  [[ "$residue_classification" == "SYSTEM_POSTGRES_SERVICE" ]] || {
-    echo "unexpected residue classification for this rehearsal" >&2
-    return 72
-  }
+  case "${validation_type}:${residue_classification}" in
+    EXACT_CANDIDATE:SYSTEM_POSTGRES_SERVICE | \
+    NON_CANDIDATE_DIRTY_TREE_VALIDATION:EMPTY_DISPOSABLE_HOST)
+      ;;
+    *)
+      echo "unexpected residue classification for this rehearsal" >&2
+      return 72
+      ;;
+  esac
 
   [[ -n "$approved_changed_files_file" &&
     "$approved_changed_files_file" == /* &&
@@ -571,48 +642,64 @@ preflight_candidate() {
     return 64
   }
 
-  local local_head remote_head actual_parent parent_line windows_source
-  windows_source="$(wslpath -w "$source_dir")"
-  local_head="$(
-    cmd.exe /d /s /c "git -C ${windows_source} rev-parse HEAD" |
-      tr -d '\r'
-  )"
-  remote_head="$(
-    cmd.exe /d /s /c \
-      "git -C ${windows_source} ls-remote --exit-code origin refs/heads/${source_branch}" |
-      tr -d '\r' |
-      awk 'NR == 1 { print $1 }'
-  )"
-  parent_line="$(
-    cmd.exe /d /s /c \
-      "git -C ${windows_source} rev-list --parents -n 1 ${exact_commit}" |
-      tr -d '\r'
-  )"
-  [[ "$(awk '{ print NF }' <<< "$parent_line")" == "2" ]] || {
-    echo "candidate must have exactly one parent" >&2
-    return 64
-  }
-  actual_parent="$(awk '{ print $2 }' <<< "$parent_line")"
-  [[ -z "$(
-    cmd.exe /d /s /c \
-      "git -C ${windows_source} status --porcelain --untracked-files=all" |
-      tr -d '\r'
-  )" ]]
-  [[ "$local_head" == "$exact_commit" ]]
-  [[ "$remote_head" == "$exact_commit" ]]
-  [[ "$actual_parent" == "$expected_parent" ]]
-
   local actual_nul="${run_dir}/actual-changed-files.nul"
   local actual_manifest="${run_dir}/actual-changed-files.txt"
   local path manifest_status
   local -a changed_files=()
-  cmd.exe /d /s /c \
-    "git -C ${windows_source} diff --name-only -z ${expected_parent} ${exact_commit}" \
-    > "$actual_nul"
-  while IFS= read -r -d '' path; do
-    changed_files+=("$path")
-  done < "$actual_nul"
-  rm -f -- "$actual_nul"
+  local local_head remote_head actual_parent parent_line windows_source
+  if [[ "$validation_type" == "EXACT_CANDIDATE" ]]; then
+    windows_source="$(wslpath -w "$source_dir")"
+    local_head="$(
+      cmd.exe /d /s /c "git -C ${windows_source} rev-parse HEAD" |
+        tr -d '\r'
+    )"
+    remote_head="$(
+      cmd.exe /d /s /c \
+        "git -C ${windows_source} ls-remote --exit-code origin refs/heads/${source_branch}" |
+        tr -d '\r' |
+        awk 'NR == 1 { print $1 }'
+    )"
+    parent_line="$(
+      cmd.exe /d /s /c \
+        "git -C ${windows_source} rev-list --parents -n 1 ${exact_commit}" |
+        tr -d '\r'
+    )"
+    [[ "$(awk '{ print NF }' <<< "$parent_line")" == "2" ]] || {
+      echo "candidate must have exactly one parent" >&2
+      return 64
+    }
+    actual_parent="$(awk '{ print $2 }' <<< "$parent_line")"
+    [[ -z "$(
+      cmd.exe /d /s /c \
+        "git -C ${windows_source} status --porcelain --untracked-files=all" |
+        tr -d '\r'
+    )" ]]
+    [[ "$local_head" == "$exact_commit" ]]
+    [[ "$remote_head" == "$exact_commit" ]]
+    [[ "$actual_parent" == "$expected_parent" ]]
+    cmd.exe /d /s /c \
+      "git -C ${windows_source} diff --name-only -z ${expected_parent} ${exact_commit}" \
+      > "$actual_nul"
+    while IFS= read -r -d '' path; do
+      changed_files+=("$path")
+    done < "$actual_nul"
+    rm -f -- "$actual_nul"
+  else
+    local_head="$expected_parent"
+    remote_head="not-fetched"
+    actual_parent="not-applicable"
+    mapfile -t changed_files < <(
+      awk '{ sub(/^[0-9a-f]{64}[[:space:]][[:space:]]/, ""); print }' \
+        "$validation_changed_sha256_file"
+    )
+    (
+      cd "$source_dir"
+      sha256sum --check --strict "$validation_changed_sha256_file"
+    ) >/dev/null
+    [[ "$(
+      sha256sum "$validation_source_archive" | awk '{ print $1 }'
+    )" == "$validation_source_archive_sha256" ]]
+  fi
   if (( ${#changed_files[@]} == 0 )); then
     : > "$actual_manifest"
   else
@@ -639,7 +726,7 @@ preflight_candidate() {
     "$release_real" != "$source_real/"* &&
     "$(readlink -m -- "$release_archive")" != "$source_real/"* ]]
 
-  echo "preflight=pass clean-source=yes local=${local_head} remote=${remote_head} parent=${actual_parent} ports=free ownership=${residue_classification} release=${release_dir} secrets=external"
+  echo "preflight=pass validation_type=${validation_type} source=${local_head} remote=${remote_head} parent=${actual_parent} ports=free ownership=${residue_classification} release=${release_dir} bundle_sha256=${validation_bundle_sha256:-not-applicable} secrets=external"
 }
 
 verify_release_archive_fidelity() {
@@ -648,10 +735,15 @@ verify_release_archive_fidelity() {
   local path normalized blob_file archive_file archive_sha
   local -a shell_paths=(
     "deploy/release.sh"
+    "deploy/run-as-identity.sh"
+    "deploy/rollback.sh"
+    "deploy/health-check.sh"
     "deploy/migrate.sh"
     "deploy/verify-env-permissions.sh"
+    "deploy/host-preflight.sh"
     "e2e/day10/run-staging.sh"
     "e2e/day10/provision-staging.sh"
+    "e2e/day10/web-preflight.sh"
   )
 
   install -d -m 0700 "$verification_dir"
@@ -689,28 +781,117 @@ verify_release_archive_fidelity() {
   echo "archive-byte-fidelity=PASS files=${#shell_paths[@]} sha256=${archive_sha}"
 }
 
+verify_non_candidate_archive_fidelity() {
+  local verification_dir="${run_dir}/archive-fidelity"
+  local archive_list="${verification_dir}/archive.list"
+  local expected_path expected_sha archive_sha path normalized
+  local -a manifest_paths=()
+  local -a hash_paths=()
+  local -a shell_paths=(
+    "deploy/release.sh"
+    "deploy/run-as-identity.sh"
+    "deploy/rollback.sh"
+    "deploy/health-check.sh"
+    "deploy/migrate.sh"
+    "deploy/verify-env-permissions.sh"
+    "deploy/host-preflight.sh"
+    "e2e/day10/run-staging.sh"
+    "e2e/day10/provision-staging.sh"
+    "e2e/day10/web-preflight.sh"
+  )
+
+  install -d -m 0700 "$verification_dir"
+  tar -tf "$release_archive" > "$archive_list"
+  while IFS= read -r path; do
+    normalized=${path%/}
+    case "/${normalized}/" in
+      */.git/*|*/node_modules/*|*/.next/*|*/.turbo/*)
+        echo "non-candidate archive contains a forbidden repository or build path" >&2
+        return 1
+        ;;
+    esac
+    if [[ -n "$normalized" ]] && candidate_path_is_sensitive "$normalized"; then
+      echo "non-candidate archive contains a forbidden secret-like filename" >&2
+      return 1
+    fi
+  done < "$archive_list"
+
+  mapfile -t manifest_paths < "$approved_changed_files_file"
+  while read -r expected_sha expected_path; do
+    [[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]]
+    validate_candidate_relative_path "$expected_path"
+    hash_paths+=("$expected_path")
+    [[ "$(
+      tar -xOf "$release_archive" "$expected_path" | sha256sum | awk '{ print $1 }'
+    )" == "$expected_sha" ]]
+  done < "$validation_changed_sha256_file"
+  diff -u \
+    <(printf '%s\n' "${manifest_paths[@]}" | LC_ALL=C sort -u) \
+    <(printf '%s\n' "${hash_paths[@]}" | LC_ALL=C sort -u)
+
+  for path in "${shell_paths[@]}"; do
+    tar -xOf "$release_archive" "$path" > "${verification_dir}/shell"
+    bash -n "${verification_dir}/shell"
+  done
+  archive_sha="$(sha256sum "$release_archive" | awk '{ print $1 }')"
+  [[ "$archive_sha" == "$validation_source_archive_sha256" ]]
+  find "$verification_dir" -depth -mindepth 1 -delete
+  rmdir "$verification_dir"
+  echo "archive-byte-fidelity=PASS validation_type=${validation_type} changed_files=${#hash_paths[@]} sha256=${archive_sha}"
+}
+
 prepare_release() {
   local windows_source windows_archive
-  windows_source="$(wslpath -w "$source_dir")"
-  windows_archive="$(wslpath -w "$release_archive")"
-  cmd.exe /d /s /c \
-    "git -C ${windows_source} -c core.autocrlf=false -c core.eol=lf archive --format=tar --output=${windows_archive} ${exact_commit}"
+  if [[ "$validation_type" == "EXACT_CANDIDATE" ]]; then
+    windows_source="$(wslpath -w "$source_dir")"
+    windows_archive="$(wslpath -w "$release_archive")"
+    cmd.exe /d /s /c \
+      "git -C ${windows_source} -c core.autocrlf=false -c core.eol=lf archive --format=tar --output=${windows_archive} ${exact_commit}"
+  else
+    cp -- "$validation_source_archive" "$release_archive"
+  fi
   [[ -f "$release_archive" ]] || return 1
-  verify_release_archive_fidelity
+  if [[ "$validation_type" == "EXACT_CANDIDATE" ]]; then
+    verify_release_archive_fidelity
+  else
+    verify_non_candidate_archive_fidelity
+  fi
   [[ ! -e "$current_link" && ! -d "$release_dir" ]] || {
     echo "stale release path exists" >&2
     return 1
   }
-  install -d -m 0755 "${release_root}/releases" "$release_dir"
+  install -d -o root -g "$day10_release_group" -m 0750 \
+    "$release_root" "${release_root}/releases" "$release_dir"
   release_created=1
   (
     umask 022
     tar -xf "$release_archive" -C "$release_dir"
     printf '%s\n' "$exact_commit" > "${release_dir}/.depress-release"
-    /usr/local/bin/pnpm --dir "$release_dir" install --frozen-lockfile
+    if [[ "$validation_type" == "NON_CANDIDATE_DIRTY_TREE_VALIDATION" ]]; then
+      printf '%s\n' \
+        "validation_type=${validation_type}" \
+        "release_source=NON_CANDIDATE_DIRTY_TREE_BUNDLE" \
+        "bundle_sha256=${validation_bundle_sha256}" \
+        > "${release_dir}/.depress-validation"
+    fi
+    /usr/local/bin/pnpm --dir "$release_dir" install --frozen-lockfile \
+      --package-import-method=copy
     DEPRESS_API_ORIGIN="http://127.0.0.1:13001" \
       /usr/local/bin/pnpm --dir "$release_dir" build
   )
+  DEPRESS_ROOT="$release_root" \
+    DEPRESS_RELEASE_GROUP="$day10_release_group" \
+    DEPRESS_WEB_USER="$day10_web_user" \
+    DEPRESS_WEB_GROUP="$day10_web_group" \
+    DEPRESS_API_USER="$day10_api_user" \
+    DEPRESS_API_GROUP="$day10_api_group" \
+    DEPRESS_OUTBOX_USER="$day10_outbox_user" \
+    DEPRESS_OUTBOX_GROUP="$day10_outbox_group" \
+    DEPRESS_WORKER_USER="$day10_worker_user" \
+    DEPRESS_WORKER_GROUP="$day10_worker_group" \
+    DEPRESS_MIGRATION_USER="$day10_migration_user" \
+    DEPRESS_MIGRATION_GROUP="$day10_migration_group" \
+    bash "${release_dir}/deploy/release-permissions.sh" normalize "$release_dir"
   ln -s "$release_dir" "$current_link"
 }
 
@@ -828,13 +1009,15 @@ COMPOSE
   if [[ "$runner_mode" != "database-gate" ]]; then
     local seed_file
     for seed_file in "${config_dir}/seed-a.env" "${config_dir}/seed-b.env"; do
-      set -a
-      # shellcheck disable=SC1090
-      source "$seed_file"
-      set +a
-      runuser -u "$day10_api_user" --preserve-environment -- \
-        /usr/local/bin/pnpm --dir "$release_dir" \
-        --filter @depress/api auth:seed-mentor
+      run_as_identity_from_safe_cwd "$day10_api_user" /bin/bash -c '
+        set -euo pipefail
+        set -a
+        # shellcheck disable=SC1090
+        source "$1"
+        set +a
+        exec /usr/local/bin/pnpm --dir "$2" \
+          --filter @depress/api auth:seed-mentor
+      ' bash "$seed_file" "$release_dir"
     done
   fi
 
@@ -916,8 +1099,12 @@ verify_day10_env_permissions() {
     DEPRESS_WORKER_GROUP="$day10_worker_group" \
     DEPRESS_MIGRATION_USER="$day10_migration_user" \
     DEPRESS_MIGRATION_GROUP="$day10_migration_group" \
+    DEPRESS_WEB_USER="$day10_web_user" \
+    DEPRESS_WEB_GROUP="$day10_web_group" \
+    DEPRESS_RELEASE_GROUP="$day10_release_group" \
     DEPRESS_DOCKER_GROUP="$day10_docker_group" \
     DEPRESS_WORKER_ENV_FILE="${config_dir}/worker.env" \
+    DEPRESS_WEB_ENV_FILE="${config_dir}/web.env" \
     bash "${release_dir}/deploy/verify-env-permissions.sh"
 }
 
@@ -926,12 +1113,25 @@ run_playwright() {
   local trace_mode="${2:-off}"
   local chromium_assignment=""
   local playwright_status
-  if [[ "$mode" == "smoke" ]]; then
+  if [[ "$mode" == "smoke" && "$validation_type" == "EXACT_CANDIDATE" ]]; then
     chromium_assignment="set DAY10_CHROMIUM_EXECUTABLE=D:\\depress-day10-wsl\\ms-playwright\\chromium-1234\\chrome-win64\\chrome.exe&&"
   fi
   set +e
-  cmd.exe /d /s /c \
-    "${chromium_assignment}set DAY10_MODE=${mode}&&set DAY10_TRACE=${trace_mode}&&set DAY10_CANDIDATE_SHA=${exact_commit}&&cd /d D:\\depress&&pnpm test:e2e:day10" &
+  if [[ "$validation_type" == "EXACT_CANDIDATE" ]]; then
+    cmd.exe /d /s /c \
+      "${chromium_assignment}set DAY10_MODE=${mode}&&set DAY10_TRACE=${trace_mode}&&set DAY10_CANDIDATE_SHA=${exact_commit}&&cd /d D:\\depress&&pnpm test:e2e:day10" &
+  else
+    DAY10_MODE="$mode" \
+      DAY10_TRACE="$trace_mode" \
+      DAY10_CANDIDATE_SHA="$exact_commit" \
+      DAY10_VALIDATION_TYPE="$validation_type" \
+      DAY10_EXTERNAL_ROOT="$staging_root" \
+      DAY10_E2E_ENV_FILE="${staging_root}/e2e.env" \
+      DAY10_CONTROL_MODE=native \
+      DAY10_CONTROL_SCRIPT="${script_dir}/staging-control.sh" \
+      DAY10_TEST_OUTPUT_DIR="$test_results_dir" \
+      /usr/local/bin/pnpm --dir "$repo_root" test:e2e:day10 &
+  fi
   playwright_launcher_pid="$!"
   playwright_spawned="yes"
   record_state playwright_spawned "$playwright_spawned"
@@ -944,6 +1144,65 @@ run_playwright() {
   record_state playwright_exit_code "$playwright_status"
   record_state playwright_exited_at "$(timestamp)"
   return "$playwright_status"
+}
+
+verify_four_service_rollback() {
+  local health_wrapper="${run_dir}/rollback-health-check"
+  [[ ! -e "$rollback_release_dir" && ! -L "$rollback_release_dir" ]]
+  cp -al -- "$release_dir" "$rollback_release_dir"
+  rm -- "${rollback_release_dir}/.depress-release"
+  printf '%s\n' "$rollback_release_id" > "${rollback_release_dir}/.depress-release"
+  DEPRESS_ROOT="$release_root" \
+    DEPRESS_RELEASE_GROUP="$day10_release_group" \
+    DEPRESS_WEB_USER="$day10_web_user" DEPRESS_WEB_GROUP="$day10_web_group" \
+    DEPRESS_API_USER="$day10_api_user" DEPRESS_API_GROUP="$day10_api_group" \
+    DEPRESS_OUTBOX_USER="$day10_outbox_user" DEPRESS_OUTBOX_GROUP="$day10_outbox_group" \
+    DEPRESS_WORKER_USER="$day10_worker_user" DEPRESS_WORKER_GROUP="$day10_worker_group" \
+    DEPRESS_MIGRATION_USER="$day10_migration_user" DEPRESS_MIGRATION_GROUP="$day10_migration_group" \
+    bash "${release_dir}/deploy/release-permissions.sh" normalize "$rollback_release_dir"
+  ln -s "$rollback_release_dir" "$previous_link"
+  cat > "$health_wrapper" <<'HEALTH'
+#!/usr/bin/env bash
+set -euo pipefail
+HEALTH_ORIGIN=https://127.0.0.1:18443 \
+  HEALTH_HOST_HEADER=127.0.0.1 \
+  HEALTH_INSECURE=1 \
+  HEALTH_SKIP_BAD_HOST=1 \
+  /opt/depress/current/deploy/health-check.sh
+HEALTH
+  chmod 0700 "$health_wrapper"
+
+  DEPRESS_ROOT="$release_root" \
+    DEPRESS_RELEASE_GROUP="$day10_release_group" \
+    DEPRESS_WEB_USER="$day10_web_user" DEPRESS_WEB_GROUP="$day10_web_group" \
+    DEPRESS_API_USER="$day10_api_user" DEPRESS_API_GROUP="$day10_api_group" \
+    DEPRESS_OUTBOX_USER="$day10_outbox_user" DEPRESS_OUTBOX_GROUP="$day10_outbox_group" \
+    DEPRESS_WORKER_USER="$day10_worker_user" DEPRESS_WORKER_GROUP="$day10_worker_group" \
+    DEPRESS_MIGRATION_USER="$day10_migration_user" DEPRESS_MIGRATION_GROUP="$day10_migration_group" \
+    SYSTEMCTL_BIN=systemctl \
+    HEALTH_CHECK_BIN="$health_wrapper" \
+    bash "${release_dir}/deploy/rollback.sh" "$rollback_release_id"
+  [[ "$(readlink -f -- "$current_link")" == "$rollback_release_dir" ]]
+  for unit in depress-api depress-outbox depress-pointer-worker depress-web; do
+    systemctl is-active --quiet "$unit"
+    systemctl show "$unit" -p ExecStart --value | grep -Fq "/opt/depress/current"
+  done
+
+  DEPRESS_ROOT="$release_root" \
+    DEPRESS_RELEASE_GROUP="$day10_release_group" \
+    DEPRESS_WEB_USER="$day10_web_user" DEPRESS_WEB_GROUP="$day10_web_group" \
+    DEPRESS_API_USER="$day10_api_user" DEPRESS_API_GROUP="$day10_api_group" \
+    DEPRESS_OUTBOX_USER="$day10_outbox_user" DEPRESS_OUTBOX_GROUP="$day10_outbox_group" \
+    DEPRESS_WORKER_USER="$day10_worker_user" DEPRESS_WORKER_GROUP="$day10_worker_group" \
+    DEPRESS_MIGRATION_USER="$day10_migration_user" DEPRESS_MIGRATION_GROUP="$day10_migration_group" \
+    SYSTEMCTL_BIN=systemctl \
+    HEALTH_CHECK_BIN="$health_wrapper" \
+    bash "${rollback_release_dir}/deploy/rollback.sh" "$exact_commit"
+  [[ "$(readlink -f -- "$current_link")" == "$release_dir" ]]
+  for unit in depress-api depress-outbox depress-pointer-worker depress-web; do
+    systemctl is-active --quiet "$unit"
+  done
+  echo "rollback-four-services=PASS from=${exact_commit} to=${rollback_release_id} restored=${exact_commit} version-split=none"
 }
 
 run_focused_playwright() {
@@ -1048,15 +1307,16 @@ fi
 run_phase prepare-redis prepare_redis
 run_phase prepare-minio prepare_minio
 run_phase prepare-database prepare_database
-run_phase worker-preflight-independent /bin/bash /mnt/d/depress/e2e/day10/worker-preflight.sh independent
+run_phase worker-preflight-independent /bin/bash "${script_dir}/worker-preflight.sh" independent
 run_phase start-application start_application
+run_phase web-preflight /bin/bash "${script_dir}/web-preflight.sh"
 
 if [[ "$runner_mode" == "preflight" || "$runner_mode" == "focused" || "$runner_mode" == "full" ]]; then
-  run_phase worker-preflight-idle /bin/bash /mnt/d/depress/e2e/day10/worker-preflight.sh idle
+  run_phase worker-preflight-idle /bin/bash "${script_dir}/worker-preflight.sh" idle
 fi
 
 [[ "$(cat "${current_link}/.depress-release")" == "$exact_commit" ]]
-echo "staging-ready commit=${exact_commit} mode=${runner_mode}"
+echo "staging-ready validation_type=${validation_type} id=${exact_commit} mode=${runner_mode}"
 
 if [[ "$runner_mode" == "cleanup-proof" ]]; then
   echo "controlled-preflight-failure=triggered" >&2
@@ -1088,6 +1348,9 @@ case "$runner_mode" in
     ;;
 esac
 phase_end playwright
+if [[ "$runner_mode" == "full" ]]; then
+  run_phase rollback-four-services verify_four_service_rollback
+fi
 phase_begin SUCCESS
 phase_end SUCCESS
 exit 0

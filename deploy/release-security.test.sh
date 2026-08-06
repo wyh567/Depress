@@ -9,8 +9,22 @@ fi
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 readonly RELEASE_SCRIPT="${SCRIPT_DIR}/release.sh"
 SANDBOX=$(mktemp -d)
+chmod 0711 "$SANDBOX"
+readonly SUFFIX="${BASHPID}"
+readonly RELEASE_GROUP="dprs${SUFFIX}"
+readonly -a TEST_USERS=("drw${SUFFIX}" "dra${SUFFIX}" "dro${SUFFIX}" "drj${SUFFIX}" "drm${SUFFIX}")
+readonly -a TEST_GROUPS=("dgrw${SUFFIX}" "dgra${SUFFIX}" "dgro${SUFFIX}" "dgrj${SUFFIX}" "dgrm${SUFFIX}")
+created_users=()
+created_groups=()
 
 cleanup() {
+  local user group
+  for user in "${created_users[@]}"; do
+    userdel "$user" 2>/dev/null || true
+  done
+  for group in "${created_groups[@]}"; do
+    groupdel "$group" 2>/dev/null || true
+  done
   if [[ -n ${SANDBOX:-} && -d ${SANDBOX} && ${SANDBOX} == /tmp/* ]]; then
     rm -rf -- "${SANDBOX}"
   fi
@@ -20,10 +34,28 @@ trap cleanup EXIT
 FAKE_COREPACK="${SANDBOX}/corepack"
 FAKE_SYSTEMCTL="${SANDBOX}/systemctl"
 FAKE_FAIL_SYSTEMCTL="${SANDBOX}/systemctl-fail"
-printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "${FAKE_COREPACK}"
+FAKE_HEALTH="${SANDBOX}/health-check"
+printf '%s\n' '#!/usr/bin/env bash' \
+  'printf "%s\n" "$*" >> "${COREPACK_LOG:?}"' 'exit 0' > "${FAKE_COREPACK}"
 printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "${FAKE_SYSTEMCTL}"
 printf '%s\n' '#!/usr/bin/env bash' 'exit 23' > "${FAKE_FAIL_SYSTEMCTL}"
-chmod 0755 "${FAKE_COREPACK}" "${FAKE_SYSTEMCTL}" "${FAKE_FAIL_SYSTEMCTL}"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "${FAKE_HEALTH}"
+chmod 0755 "${FAKE_COREPACK}" "${FAKE_SYSTEMCTL}" "${FAKE_FAIL_SYSTEMCTL}" "${FAKE_HEALTH}"
+COREPACK_LOG="${SANDBOX}/corepack.log"
+: > "$COREPACK_LOG"
+
+groupadd --system "$RELEASE_GROUP"
+created_groups+=("$RELEASE_GROUP")
+for group in "${TEST_GROUPS[@]}"; do
+  groupadd --system "$group"
+  created_groups=("$group" "${created_groups[@]}")
+done
+for index in "${!TEST_USERS[@]}"; do
+  useradd --system --no-create-home --shell /usr/sbin/nologin \
+    --gid "${TEST_GROUPS[$index]}" "${TEST_USERS[$index]}"
+  created_users=("${TEST_USERS[$index]}" "${created_users[@]}")
+  usermod -aG "$RELEASE_GROUP" "${TEST_USERS[$index]}"
+done
 
 CASE_REPO=
 CASE_ROOT=
@@ -65,8 +97,16 @@ run_release() {
   local sha=${1:-${CASE_SHA}}
 
   DEPRESS_ROOT="${CASE_ROOT}" \
+    DEPRESS_RELEASE_GROUP="$RELEASE_GROUP" \
+    DEPRESS_WEB_USER="${TEST_USERS[0]}" DEPRESS_WEB_GROUP="${TEST_GROUPS[0]}" \
+    DEPRESS_API_USER="${TEST_USERS[1]}" DEPRESS_API_GROUP="${TEST_GROUPS[1]}" \
+    DEPRESS_OUTBOX_USER="${TEST_USERS[2]}" DEPRESS_OUTBOX_GROUP="${TEST_GROUPS[2]}" \
+    DEPRESS_WORKER_USER="${TEST_USERS[3]}" DEPRESS_WORKER_GROUP="${TEST_GROUPS[3]}" \
+    DEPRESS_MIGRATION_USER="${TEST_USERS[4]}" DEPRESS_MIGRATION_GROUP="${TEST_GROUPS[4]}" \
     SYSTEMCTL_BIN="${CASE_SYSTEMCTL}" \
     COREPACK_BIN="${FAKE_COREPACK}" \
+    COREPACK_LOG="$COREPACK_LOG" \
+    HEALTH_CHECK_BIN="${FAKE_HEALTH}" \
     DEPRESS_API_ORIGIN=http://127.0.0.1:3001 \
     bash "${RELEASE_SCRIPT}" "${CASE_REPO}" "${sha}"
 }
@@ -88,6 +128,9 @@ run_release >/dev/null
 [[ $(cat "${CASE_ROOT}/releases/${CASE_SHA}/.depress-release") == "${CASE_SHA}" ]] ||
   fail "clean release marker is incorrect"
 pass "clean exact SHA releases"
+grep -Fxq 'pnpm install --frozen-lockfile --package-import-method=copy' "$COREPACK_LOG" ||
+  fail "release install did not force copy package imports"
+pass "release install cannot hard-link runtime files to the pnpm store"
 
 new_case tracked-modified
 printf '%s\n' "dirty" >> "${CASE_REPO}/tracked.txt"
@@ -121,10 +164,15 @@ pass "ignored environment and build outputs cannot enter archive"
 new_case archive-fidelity
 declare -a CRITICAL_SHELL_FILES=(
   "deploy/release.sh"
+  "deploy/run-as-identity.sh"
+  "deploy/rollback.sh"
+  "deploy/health-check.sh"
   "deploy/migrate.sh"
   "deploy/verify-env-permissions.sh"
+  "deploy/host-preflight.sh"
   "e2e/day10/run-staging.sh"
   "e2e/day10/provision-staging.sh"
+  "e2e/day10/web-preflight.sh"
 )
 SOURCE_REPO=$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel)
 for critical_path in "${CRITICAL_SHELL_FILES[@]}"; do
@@ -190,6 +238,14 @@ run_release >/dev/null
 [[ $(readlink -f "${CASE_ROOT}/previous") == "${OLD_RELEASE}" ]] ||
   fail "previous did not retain the former current release"
 pass "current symlink switches atomically and previous is retained"
+
+new_case current-escape
+OUTSIDE_RELEASE="${SANDBOX}/outside-release"
+mkdir -p "$OUTSIDE_RELEASE" "$CASE_ROOT"
+ln -s "$OUTSIDE_RELEASE" "${CASE_ROOT}/current"
+expect_rejection "current target outside releases is rejected"
+[[ "$(readlink -f "${CASE_ROOT}/current")" == "$OUTSIDE_RELEASE" ]] ||
+  fail "escaping current link was modified"
 
 new_case preserve-links
 CURRENT_RELEASE="${CASE_ROOT}/releases/current-old"

@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+readonly script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly external_root="${DAY10_EXTERNAL_ROOT:-/mnt/d/depress-day10-wsl}"
+
 # shellcheck disable=SC1091
-source /mnt/d/depress/e2e/day10/identity-topology.sh
+source "${script_dir}/identity-topology.sh"
+# shellcheck disable=SC1091
+source "${script_dir}/../../deploy/run-as-identity.sh"
 
 command_name="${1:-}"
 shift || true
@@ -31,11 +36,14 @@ wait_active() {
 
 db_query() {
   local sql="$1"
-  set -a
-  # shellcheck disable=SC1090
-  source "$migration_env"
-  set +a
-  runuser -u postgres -- psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atqc "$sql"
+  run_as_identity_from_safe_cwd postgres /bin/bash -c '
+    set -euo pipefail
+    set -a
+    # shellcheck disable=SC1090
+    source "$1"
+    set +a
+    exec /usr/bin/psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atqc "$2"
+  ' bash "$migration_env" "$sql"
 }
 
 restart_worker() {
@@ -107,12 +115,14 @@ case "$command_name" in
     ;;
   seed-stability-user)
     seed_file="/etc/depress-day10/seed-stability.env"
-    set -a
-    # shellcheck disable=SC1090
-    source "$seed_file"
-    set +a
-    runuser -u "$day10_api_user" --preserve-environment -- \
-      /usr/local/bin/pnpm --dir "$release" --filter @depress/api auth:seed-mentor >/dev/null
+    run_as_identity_from_safe_cwd "$day10_api_user" /bin/bash -c '
+      set -euo pipefail
+      set -a
+      # shellcheck disable=SC1090
+      source "$1"
+      set +a
+      exec /usr/local/bin/pnpm --dir "$2" --filter @depress/api auth:seed-mentor
+    ' bash "$seed_file" "$release" >/dev/null
     echo "stability-user-seeded"
     ;;
   document-cite-order)
@@ -177,14 +187,17 @@ case "$command_name" in
     ;;
   pdf-info)
     [[ "${1:-}" =~ ^[a-z0-9-]+\.pdf$ ]] || exit 64
-    pdfinfo "/mnt/d/depress-day10-wsl/artifacts/$1"
+    pdfinfo "${external_root}/artifacts/$1"
     ;;
   pdf-text)
     [[ "${1:-}" =~ ^[a-z0-9-]+\.pdf$ ]] || exit 64
-    pdftotext -layout "/mnt/d/depress-day10-wsl/artifacts/$1" -
+    pdftotext -layout "${external_root}/artifacts/$1" -
     ;;
   topology)
     echo "release=$(cat /opt/depress/current/.depress-release)"
+    if [[ -f /opt/depress/current/.depress-validation ]]; then
+      cat /opt/depress/current/.depress-validation
+    fi
     for unit in depress-web-day10.service depress-api.service depress-outbox.service depress-pointer-worker.service; do
       systemctl show "$unit" -p Id -p ActiveState -p SubState -p User -p Group -p MainPID -p ExecStart --value |
         tr '\n' ' ' | sed "s/^/$unit /"
@@ -202,16 +215,23 @@ case "$command_name" in
       DEPRESS_WORKER_GROUP="$day10_worker_group" \
       DEPRESS_MIGRATION_USER="$day10_migration_user" \
       DEPRESS_MIGRATION_GROUP="$day10_migration_group" \
+      DEPRESS_WEB_USER="$day10_web_user" \
+      DEPRESS_WEB_GROUP="$day10_web_group" \
+      DEPRESS_RELEASE_GROUP="$day10_release_group" \
       DEPRESS_DOCKER_GROUP="$day10_docker_group" \
       DEPRESS_WORKER_ENV_FILE=/etc/depress-day10/worker.env \
+      DEPRESS_WEB_ENV_FILE=/etc/depress-day10/web.env \
       bash "$release/deploy/verify-env-permissions.sh"
-    runuser -u "$day10_worker_user" -- docker info >/dev/null
+    run_as_identity_from_safe_cwd "$day10_worker_user" \
+      /usr/bin/docker info >/dev/null
     worker_pid="$(systemctl show "$worker" -p MainPID --value)"
-    nsenter -t "$worker_pid" -m -- runuser -u "$day10_worker_user" -- \
-      test -w "$day10_worker_runtime"
+    nsenter -t "$worker_pid" -m -- /bin/bash \
+      "$release/deploy/run-as-identity.sh" "$day10_worker_user" \
+      /usr/bin/test -w "$day10_worker_runtime"
     for path in "$release" /etc /var/log /tmp; do
-      if nsenter -t "$worker_pid" -m -- runuser -u "$day10_worker_user" -- \
-        test -w "$path"; then
+      if nsenter -t "$worker_pid" -m -- /bin/bash \
+        "$release/deploy/run-as-identity.sh" "$day10_worker_user" \
+        /usr/bin/test -w "$path"; then
         echo "unexpected-worker-write=$path"
         exit 1
       fi

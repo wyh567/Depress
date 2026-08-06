@@ -12,6 +12,15 @@ MIGRATION_ENV_FILE=${MIGRATION_ENV_FILE:-/etc/depress/migration.env}
 MIGRATION_USER=${MIGRATION_USER:-depress-migration}
 MIGRATION_RUNTIME_DIR=${MIGRATION_RUNTIME_DIR:-/run/depress-migration}
 COREPACK_BIN=${COREPACK_BIN:-/usr/bin/corepack}
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+IDENTITY_EXEC=${DEPRESS_IDENTITY_EXEC_BIN:-${SCRIPT_DIR}/run-as-identity.sh}
+
+[[ -f "$IDENTITY_EXEC" && ! -L "$IDENTITY_EXEC" ]] || {
+  echo "migration identity runner is missing or a symlink" >&2
+  exit 1
+}
+# shellcheck disable=SC1090
+source "$IDENTITY_EXEC"
 
 test -L "${DEPRESS_ROOT}/current"
 test -r "${MIGRATION_ENV_FILE}"
@@ -67,8 +76,8 @@ ensure_private_runtime_directory "${MIGRATION_RUNTIME_DIR}"
 ensure_private_runtime_directory "${MIGRATION_RUNTIME_DIR}/corepack"
 ensure_private_runtime_directory "${MIGRATION_RUNTIME_DIR}/cache"
 
-runuser -u "${MIGRATION_USER}" -- \
-  env -i \
+run_as_identity_from_safe_cwd "${MIGRATION_USER}" \
+  /usr/bin/env \
   HOME="${MIGRATION_RUNTIME_DIR}" \
   COREPACK_HOME="${MIGRATION_RUNTIME_DIR}/corepack" \
   XDG_CACHE_HOME="${MIGRATION_RUNTIME_DIR}/cache" \

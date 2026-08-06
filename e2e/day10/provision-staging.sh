@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 
+readonly day10_provision_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${day10_provision_script_dir}/../../deploy/run-as-identity.sh"
+
 day10_database_password=""
 day10_config_created=0
 day10_identity_state_written=0
 day10_migration_runtime_registered=0
 day10_created_users=()
 day10_created_groups=()
+day10_release_group_created=0
 day10_units_created=()
 day10_unit_dir="${DAY10_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 
@@ -82,6 +87,10 @@ create_day10_private_identities() {
       return 71
     }
   done
+  ! getent group "$day10_release_group" >/dev/null 2>&1 || {
+    echo "refusing pre-existing Day 10 release group: ${day10_release_group}" >&2
+    return 71
+  }
 
   install -d -o root -g root -m 0755 "$state_root"
   [[ ! -e "$identity_state_file" && ! -L "$identity_state_file" ]] || {
@@ -95,10 +104,14 @@ create_day10_private_identities() {
     "outbox=${day10_outbox_user}:${day10_outbox_group}" \
     "worker=${day10_worker_user}:${day10_worker_group}" \
     "migration=${day10_migration_user}:${day10_migration_group}" \
+    "web=${day10_web_user}:${day10_web_group}" \
+    "release_group=${day10_release_group}" \
     > "$identity_state_file"
   chmod 0600 "$identity_state_file"
   day10_identity_state_written=1
 
+  groupadd --system "$day10_release_group"
+  day10_release_group_created=1
   for ((index=0; index<${#day10_private_groups[@]}; index++)); do
     group="${day10_private_groups[$index]}"
     user="${day10_private_users[$index]}"
@@ -107,6 +120,9 @@ create_day10_private_identities() {
     useradd --system --no-create-home --shell /usr/sbin/nologin \
       --gid "$group" "$user"
     day10_created_users+=("$user")
+  done
+  for user in "${day10_private_users[@]}"; do
+    usermod -aG "$day10_release_group" "$user"
   done
   usermod -aG "$day10_docker_group" "$day10_worker_user"
 }
@@ -125,7 +141,9 @@ remove_day10_private_identities() {
     grep -Fxq "api=${day10_api_user}:${day10_api_group}" "$identity_state_file" &&
     grep -Fxq "outbox=${day10_outbox_user}:${day10_outbox_group}" "$identity_state_file" &&
     grep -Fxq "worker=${day10_worker_user}:${day10_worker_group}" "$identity_state_file" &&
-    grep -Fxq "migration=${day10_migration_user}:${day10_migration_group}" "$identity_state_file" || {
+    grep -Fxq "migration=${day10_migration_user}:${day10_migration_group}" "$identity_state_file" &&
+    grep -Fxq "web=${day10_web_user}:${day10_web_group}" "$identity_state_file" &&
+    grep -Fxq "release_group=${day10_release_group}" "$identity_state_file" || {
       echo "refusing identity cleanup after ownership marker changed" >&2
       return 70
     }
@@ -150,6 +168,14 @@ remove_day10_private_identities() {
       groupdel "$group"
     fi
   done
+  if (( day10_release_group_created == 1 )); then
+    [[ -z "$(getent group "$day10_release_group" | cut -d: -f4)" ]] || {
+      echo "refusing to remove a non-empty Day 10 release group" >&2
+      return 70
+    }
+    groupdel "$day10_release_group"
+    day10_release_group_created=0
+  fi
   rm -- "$identity_state_file"
   day10_identity_state_written=0
 }
@@ -159,7 +185,7 @@ provision_day10_staging() {
   local worker_access_key worker_secret_key mentor_a_password mentor_b_password
   local database_url stability_email stability_password unit_path
 
-  for account in depress-web depress-redis depress-s3; do
+  for account in depress-redis depress-s3; do
     id "$account" >/dev/null
   done
   getent group depress-runtime >/dev/null
@@ -190,6 +216,8 @@ provision_day10_staging() {
     "NODE_ENV=production" \
     "PORT=13000" \
     "HOSTNAME=127.0.0.1" \
+    "NEXT_TELEMETRY_DISABLED=1" \
+    "DEPRESS_API_ORIGIN=http://127.0.0.1:13001" \
     > "${config_dir}/web.env"
 
   printf '%s\n' \
@@ -287,16 +315,15 @@ provision_day10_staging() {
   chown "root:${day10_outbox_group}" "${config_dir}/outbox.env"
   chown "root:${day10_worker_group}" "${config_dir}/worker.env"
   chown "root:${day10_migration_group}" "${config_dir}/migration.env"
+  chown "root:${day10_web_group}" "${config_dir}/web.env"
   chmod 0640 \
     "${config_dir}/api.env" \
     "${config_dir}/outbox.env" \
     "${config_dir}/worker.env" \
-    "${config_dir}/migration.env"
-  chown root:depress-runtime \
-    "${config_dir}/web.env" \
-    "${config_dir}/minio-root.env"
+    "${config_dir}/migration.env" \
+    "${config_dir}/web.env"
+  chown root:depress-runtime "${config_dir}/minio-root.env"
   chmod 0640 \
-    "${config_dir}/web.env" \
     "${config_dir}/minio-root.env"
   chmod 0600 \
     "${config_dir}/seed-a.env" \
@@ -350,7 +377,7 @@ events {
   worker_connections 256;
 }
 
-http {
+  http {
   access_log /var/log/depress-day10/access.log;
 
   server {
@@ -364,10 +391,15 @@ http {
 
     location /api/ {
       proxy_pass http://127.0.0.1:13001;
+      proxy_http_version 1.1;
       proxy_set_header Host $host;
       proxy_set_header X-Forwarded-Host $host;
       proxy_set_header X-Forwarded-Proto https;
       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header Connection "";
+      proxy_buffering off;
+      proxy_read_timeout 120s;
     }
 
     location /health/ {
@@ -378,10 +410,12 @@ http {
 
     location / {
       proxy_pass http://127.0.0.1:13000;
+      proxy_http_version 1.1;
       proxy_set_header Host $host;
       proxy_set_header X-Forwarded-Host $host;
       proxy_set_header X-Forwarded-Proto https;
       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Real-IP $remote_addr;
     }
   }
 }
@@ -392,6 +426,7 @@ NGINX
   install -d -o root -g root -m 0755 "$day10_unit_dir"
   for unit_path in \
     "${day10_unit_dir}/depress-web-day10.service" \
+    "${day10_unit_dir}/depress-web.service" \
     "${day10_unit_dir}/depress-api.service" \
     "${day10_unit_dir}/depress-outbox.service" \
     "${day10_unit_dir}/depress-pointer-worker.service" \
@@ -407,24 +442,39 @@ NGINX
   cat > "${day10_unit_dir}/depress-web-day10.service" <<'UNIT'
 [Unit]
 Description=DePress Day 10 Web
-After=network.target
+After=network.target depress-api.service
+Requires=depress-api.service
 [Service]
 Type=simple
-User=depress-web
-Group=depress-runtime
+User=depress-day10-web
+Group=depress-day10-web
 WorkingDirectory=/opt/depress/current
 EnvironmentFile=/etc/depress-day10/web.env
-Environment=HOME=/tmp
+Environment=HOME=/run/depress-day10-web
+Environment=TMPDIR=/tmp
+RuntimeDirectory=depress-day10-web
+RuntimeDirectoryMode=0700
 ExecStart=/usr/local/bin/pnpm --dir /opt/depress/current --filter @depress/web start
 Restart=on-failure
 RestartSec=2s
+TimeoutStartSec=30s
+TimeoutStopSec=30s
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 ReadOnlyPaths=/opt/depress
+ReadWritePaths=/run/depress-day10-web
 UNIT
   day10_units_created+=("${day10_unit_dir}/depress-web-day10.service")
+  ln -s depress-web-day10.service "${day10_unit_dir}/depress-web.service"
+  day10_units_created+=("${day10_unit_dir}/depress-web.service")
 
   cat > "${day10_unit_dir}/depress-api.service" <<UNIT
 [Unit]
@@ -579,6 +629,7 @@ UNIT
     systemctl daemon-reload
   fi
   systemd-analyze verify \
+    "${day10_unit_dir}/depress-web-day10.service" \
     "${day10_unit_dir}/depress-api.service" \
     "${day10_unit_dir}/depress-outbox.service" \
     "${day10_unit_dir}/depress-pointer-worker.service"
@@ -588,6 +639,15 @@ remove_day10_staging_config() {
   local index unit_file
   for ((index=${#day10_units_created[@]} - 1; index >= 0; index--)); do
     unit_file="${day10_units_created[$index]}"
+    if [[ "$unit_file" == "${day10_unit_dir}/depress-web.service" ]]; then
+      [[ -L "$unit_file" &&
+        "$(readlink "$unit_file")" == "depress-web-day10.service" ]] || {
+        echo "refusing cleanup after the Day 10 Web alias changed" >&2
+        return 70
+      }
+      rm -- "$unit_file"
+      continue
+    fi
     [[ -f "$unit_file" && ! -L "$unit_file" ]] || {
       echo "refusing cleanup after a Day 10 unit path changed" >&2
       return 70

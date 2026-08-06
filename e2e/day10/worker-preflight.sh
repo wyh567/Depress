@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+readonly script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # shellcheck disable=SC1091
-source /mnt/d/depress/e2e/day10/identity-topology.sh
+source "${script_dir}/identity-topology.sh"
+# shellcheck disable=SC1091
+source "${script_dir}/../../deploy/run-as-identity.sh"
 
 readonly mode="${1:-}"
 readonly release="/opt/depress/current"
@@ -12,22 +16,23 @@ readonly worker_unit="depress-pointer-worker.service"
 readonly worker_runtime="$day10_worker_runtime"
 
 run_worker_with_env() {
-  (
+  run_as_identity_from_safe_cwd "$day10_worker_user" /bin/bash -c '
+    set -euo pipefail
     set -a
     # shellcheck disable=SC1090
-    source "$worker_env"
+    source "$1"
     set +a
-    export HOME="$worker_runtime"
-    export TMPDIR="$worker_runtime"
-    runuser -u "$day10_worker_user" --preserve-environment -- "$@"
-  )
+    export HOME="$2" TMPDIR="$2" XDG_CACHE_HOME="$2"
+    shift 2
+    exec "$@"
+  ' bash "$worker_env" "$worker_runtime" "$@"
 }
 
 run_worker_api_check() {
   local check_name="$1"
   run_worker_with_env \
     "${release}/apps/api/node_modules/.bin/tsx" \
-    /mnt/d/depress/e2e/day10/worker-preflight.mts "$check_name"
+    "${script_dir}/worker-preflight.mts" "$check_name"
 }
 
 safe_check() {
@@ -76,12 +81,15 @@ idle_checks() {
   [[ "$initial_pid" =~ ^[1-9][0-9]*$ ]]
 
   safe_check worker-runtime-writable \
-    nsenter -t "$initial_pid" -m -- runuser -u "$day10_worker_user" -- \
+    nsenter -t "$initial_pid" -m -- /bin/bash \
+    "${release}/deploy/run-as-identity.sh" "$day10_worker_user" \
     /usr/bin/test -w "$worker_runtime"
   safe_check release-readable-in-unit \
-    nsenter -t "$initial_pid" -m -- runuser -u "$day10_worker_user" -- \
+    nsenter -t "$initial_pid" -m -- /bin/bash \
+    "${release}/deploy/run-as-identity.sh" "$day10_worker_user" \
     /usr/bin/test -r "${release}/.depress-release"
-  if nsenter -t "$initial_pid" -m -- runuser -u "$day10_worker_user" -- \
+  if nsenter -t "$initial_pid" -m -- /bin/bash \
+    "${release}/deploy/run-as-identity.sh" "$day10_worker_user" \
     /usr/bin/test -w "$release"; then
     echo "release-not-writable-in-unit=fail" >&2
     return 1

@@ -21,10 +21,15 @@ ARCHIVE="${SANDBOX}/candidate.tar"
 mkdir -p "$FIXTURE_REPO" "$EXTRACTED"
 declare -a CRITICAL_SHELL_FILES=(
   "deploy/release.sh"
+  "deploy/run-as-identity.sh"
+  "deploy/rollback.sh"
+  "deploy/health-check.sh"
   "deploy/migrate.sh"
   "deploy/verify-env-permissions.sh"
+  "deploy/host-preflight.sh"
   "e2e/day10/run-staging.sh"
   "e2e/day10/provision-staging.sh"
+  "e2e/day10/web-preflight.sh"
 )
 for path in "${CRITICAL_SHELL_FILES[@]}"; do
   mkdir -p "${FIXTURE_REPO}/$(dirname "$path")"
