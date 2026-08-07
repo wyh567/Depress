@@ -1,6 +1,6 @@
 # T-01 — 整理工作树 + 让 CI 覆盖本分支
 
-- **状态**：`NOT_STARTED`
+- **状态**：`DONE`
 - **前置任务**：无
 - **预计改动文件数**：1（`.github/workflows/ci.yml`）+ 提交动作
 - **是否需要用户批准才能开工**：否，但**提交前必须经用户批准**
@@ -147,11 +147,121 @@ IEEE/GB/T 渲染器改动和 4 个 snapshot。这些改动：
 
 ## 完成记录
 
-- 完成日期：
-- 实际提交数与分组：
-- 四条校验命令的实测输出：
-- CI 改动内容：
+- 完成日期：（未完成，见阻塞记录）
+- 实际提交数与分组：未提交
+- 四条校验命令的实测输出：见下方阻塞记录
+- CI 改动内容：未开始（步骤 9–11 未执行）
+
+### 第一、二部分实测结果（2026-08-05）
+
+工作树盘点（步骤 1–3）：
+
+- 分支 `feature/phase4-mentor-mvp`，产品改动 **58**（与预期一致）
+- 分组：`deploy` 19 · `e2e/day10` 9 · `packages/transformers/src` 6 · `deploy/systemd` 6 ·
+  `transformers/__snapshots__` 4 · `packages/templates/src` 2 · `packages/ast/src` 2 ·
+  `deploy/nginx` 2 · `apps/web/stores` 2 · 其余各 1
+- 规模：43 files changed, 2127 insertions(+), 514 deletions(-)（不含未跟踪文件）
+
+四道校验（步骤 4）：
+
+| 命令 | 结果 |
+|---|---|
+| `pnpm lint` | ✅ **PASS** 5/5 packages |
+| `pnpm typecheck` | ❌ **FAIL** 4/5，`@depress/web` 2 个 TS2345 |
+| `pnpm test` | ✅ **PASS** 4/4 tasks，**465 passed / 51 skipped**（ast 104 · web 127 · transformers 61 · api 173+51skip） |
+| `DEPRESS_API_ORIGIN=... pnpm build` | ❌ **FAIL**，`@depress/web` 同一根因 |
+
+Shell 语法检查（步骤 5）：✅ **PASS**，41 个脚本全部通过 `bash -n`，无 `SYNTAX FAIL`。
 
 ## 阻塞记录
 
--
+**阻塞点：步骤 4 的 `pnpm typecheck` 与 `pnpm build` 失败**，命中本文件「停止条件」第 1 条。
+
+失败位置：`apps/web/stores/document-metadata.ts` 第 74、76 行，2 个 `error TS2345`。
+
+根因：该文件新增的两个本地辅助函数把参数类型**手写**成结构化字面量：
+
+```ts
+function formatAuthorLine(author: { name: string; nameEn?: string; affiliationIds?: string[] }): string
+function formatAffiliationLine(affiliation: { id: string; name: string; nameEn?: string }): string
+```
+
+而 `tsconfig` 开了 `exactOptionalPropertyTypes: true`，
+`@depress/ast` 的 `DocAuthor` / `DocAffiliation` 里对应字段是 `nameEn?: string | undefined`。
+`string | undefined` 不能赋给 `string`，`.map(formatAuthorLine)` 因此报错。
+
+**这是未提交改动引入的，不是既有问题** —— 已用 `git show HEAD:apps/web/stores/document-metadata.ts`
+核实：HEAD 版本中 `nameEn` 出现 0 次。
+
+**附带发现**：这两个手写结构化类型本身**违反 Hard Invariant #3**
+（`packages/ast` 是唯一类型源，禁止手写 interface 双份维护）。
+因此正确修法不是补 `| undefined`，而是直接 import 并使用 `@depress/ast` 导出的
+`DocAuthor` / `DocAffiliation`——一次同时解决类型错误和不变量违规。
+
+**为什么没有自行修复**：本任务「禁止触碰的文件」明确排除了所有 `apps/**` 源码，
+本任务只整理与验证、不修改产品代码。等用户决定「修」还是「回退」。
+
+**环境插曲（已解决，不构成阻塞）**：本机 `pnpm` 不在 PATH 上，
+`corepack enable` 因权限失败。已用 ASCII 路径副本 + shim 绕过，
+详情与永久解法已记入 `02-agent-rules.md` §6。
+
+---
+
+### ✅ 阻塞已解除（2026-08-05）
+
+由独立任务 [`T-01A`](T-01A-fix-duplicated-metadata-types.md) 修复：
+`formatAuthorLine` / `formatAffiliationLine` 的手写结构参数类型已替换为
+`@depress/ast` 公开导出的 `DocAuthor` / `DocAffiliation`。
+
+修复后四道校验全绿：
+
+| 命令 | 修复前 | 修复后 |
+|---|---|---|
+| `pnpm lint` | ✅ 5/5 | ✅ 5/5 |
+| `pnpm typecheck` | ❌ 4/5 | ✅ **5/5** |
+| `pnpm test` | ✅ 465/51skip | ✅ 465/51skip |
+| `pnpm build` | ❌ FAIL | ✅ **PASS** |
+
+**T-01 状态回到 `IN_PROGRESS`，从步骤 6（提出提交计划、等用户批准）继续。**
+步骤 1–5 的实测结果见上方「完成记录」，无需重跑。
+
+---
+
+### ✅ 最终收尾（用户批准，DONE）
+
+**最终 commit 链**（本仓库仅本地存在，均未 push）：
+
+| # | SHA | 标题 |
+|---|---|---|
+| 1 | `fc7b65f` | `docs(agents): add agent workflow and correct stale entry points` |
+| 2 | `d7dcff7` | `feat(metadata): add bilingual academic metadata and complete IEEE front matter` |
+| 3 | `6e0d909` | `test(sandbox): pin runtime identity in compile processor fixture` |
+| 4 | `fa4977a` | `feat(deploy): complete hardened single-VM production topology with Web tier` |
+| 5 | `b29126d` | `feat(e2e): add operator validation bundle generator` |
+| 6 | `516c20c` | `refactor(e2e): make Day10 harness environment-overridable` |
+| 7 | `516c20c` 之后 | `docs(agents): close T-01 and record validated workflow state`（本提交） |
+
+原始 58 个未提交产品改动，按意图拆分为提交 1–6（提交 7 是本次 `.agents` 状态收尾）。
+每个提交的详细分组理由、staging 决策、ECS 隔离验证过程见本轮会话记录；
+本文件只保留后续 agent 需要的结论，不复制过程。
+
+**验证状态**：全套 `lint / typecheck / test / build` 在最终提交前完整重跑一次，
+测试基线为 **465 passed / 51 skipped**，与整个提交链过程中的历次实测一致。
+已知 skipped 测试全部是 opt-in 基础设施测试（清单见 `02-agent-rules.md` §5 的表格），
+本机（Windows）无法运行，不构成回归。
+
+**Remote candidate evidence**：提交 4（部署拓扑）与提交 5（operator-validation）在提交前
+均已上传到 ECS 上的一次性隔离目录并完成 SHA-256 校验 + `bash -n` + 部分测试实际运行，
+本会话内确认目录仍存在、未被清理。具体路径与主机身份属操作细节，不记录在本文件
+（避免把机器/网络专属信息固化进仓库）。
+
+**当前 Git 状态**：分支 `feature/phase4-mentor-mvp` 本地领先 `origin`（`upstream` 仍指向
+`7a59a5a51ca665c6694f0dc5be7a0fa8569406c0`）共 **7** 个提交，尚未 `push`，
+未修改任何 PR。**下一步操作是用户决定是否 push / 发起 PR review，不是继续整理工作树。**
+
+**⚠️ 已知未完成项（不视为阻塞，但需如实记录）**：原任务验收标准第 7 条要求
+把 `.github/workflows/ci.yml` 的 `push.branches` 从 `master` 扩展到含 `feature/**`，
+使当前分支的推送也能跑 CI。**这一步从未执行**——`.github/workflows/ci.yml` 在整个
+提交链中未被改动过。用户在本轮收尾时未将其列入最终验收范围，因此本任务标记 `DONE`，
+但这个缺口原样保留：只要不扩展 CI 触发范围，`push` 之后这条分支仍然不会自动跑 CI。
+是否补做、何时补做，由用户决定；建议记为独立的小任务，而不是重开 T-01。

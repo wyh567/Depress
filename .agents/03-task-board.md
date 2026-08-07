@@ -14,7 +14,8 @@
 
 | # | 任务 | 文件 | 状态 | 前置 | 更新日期 |
 |---|---|---|---|---|---|
-| T-01 | 整理工作树 + 让 CI 覆盖本分支 | [tasks/T-01-worktree-and-ci.md](tasks/T-01-worktree-and-ci.md) | `NOT_STARTED` | 无 | 2026-08-04 |
+| T-01A | 修复 document-metadata 中重复手写的 AST 元数据类型 | [tasks/T-01A-fix-duplicated-metadata-types.md](tasks/T-01A-fix-duplicated-metadata-types.md) | `DONE` | 无（解除 T-01 阻塞） | 2026-08-05 |
+| T-01 | 整理工作树 + 让 CI 覆盖本分支 | [tasks/T-01-worktree-and-ci.md](tasks/T-01-worktree-and-ci.md) | `DONE` | 无 | 2026-08-07 |
 | T-02 | 移除遗留未认证编译入口与死代码 | [tasks/T-02-remove-legacy-compile-contract.md](tasks/T-02-remove-legacy-compile-contract.md) | `NOT_STARTED` | T-01 | 2026-08-04 |
 | T-03 | 同步 process.md / architecture.md / ADR 0007 | [tasks/T-03-sync-docs-and-adr.md](tasks/T-03-sync-docs-and-adr.md) | `NOT_STARTED` | T-02 | 2026-08-04 |
 | T-04 | P4-10 最小生产安全集 | [tasks/T-04-min-production-safety.md](tasks/T-04-min-production-safety.md) | `NOT_STARTED` | T-03 | 2026-08-04 |
@@ -48,9 +49,12 @@ T-04 之后才做 T-05，是因为限流/配额属于"开放给更多人用"的�
 | 2026-08-04 | 无邮箱验证 / 密码重置 / 邮件服务 | 公开注册的前提 | 初次分析 |
 | 2026-08-04 | 三个模板均非官方认证模板，GB/T 仅抽样验证 | 投稿前需逐条比对期刊 guideline | 初次分析 |
 | 2026-08-04 | `apps/web/components/document-workspace.tsx` 264 行，超过 `.cursorrules` 的组件 ≤150 行约定 | 既有欠债，需拆分 | 初次分析 |
+| 2026-08-05 | `document-metadata.ts` 的 `parseAuthors` / `parseAffiliations` **返回类型**仍是手写的 author/affiliation 结构镜像（同属 Invariant #3 违规）。当前**能通过类型检查**（协变方向合法），故不在 T-01A 的最小修复范围内 | Invariant #3 双份维护；日后 ast 字段变更时会静默漂移 | T-01A |
+| 2026-08-07 | 原 T-01 验收标准第 7 条（把 `.github/workflows/ci.yml` 的 `push.branches` 扩展到 `feature/**`，让当前分支推送也跑 CI）从未执行。用户在 T-01 收尾时未将其纳入最终验收范围，T-01 已标记 `DONE`，但这个缺口原样保留 | `push` 后这条分支仍不会自动跑 CI，需要人工判断才能确认改动没问题 | T-01 收尾 |
 
 ## 4. 完成历史
 
 | 完成日期 | 任务 | 结果摘要 |
 |---|---|---|
-| — | — | 暂无 |
+| 2026-08-05 | T-01A | `document-metadata.ts` 手写 AST 镜像类型替换为 `@depress/ast` 公开导出的 `DocAuthor`/`DocAffiliation`，解除 T-01 的 typecheck/build 阻塞 |
+| 2026-08-07 | T-01 | 58 个原始未提交产品改动按意图拆分为 6 个独立提交（元数据+IEEE前置信息、沙箱测试固化、部署拓扑加固、operator-validation 生成器、Day10 harness 可移植性）+ 1 个 `.agents` 收尾提交；全套 lint/typecheck/test/build 最终重跑通过，465 passed / 51 skipped；部署与 operator-validation 两个候选在 ECS 完成隔离验证；全部 7 个提交仅存在本地，未 push，PR 未改动；CI 触发范围扩展未执行，记入「发现待办」|

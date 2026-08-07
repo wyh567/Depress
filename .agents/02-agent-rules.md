@@ -127,7 +127,28 @@ git diff --stat
 
 ## 6. 已知环境事实（别浪费时间重新发现）
 
-- 包管理器是 **pnpm 9.15.4**，Node ≥ 22。不要用 npm / yarn
+### Windows 上 pnpm 可能不在 PATH 上
+
+在开工前先探测一次 `pnpm -v`。若报 `command not found`（Bash、PowerShell 都可能出现），
+不要假设系统坏了，按下面顺序处理：
+
+1. 优先改用 `corepack pnpm <command>`。
+2. 有些工作区工具（尤其是 Turbo）会**自己去 PATH 上找 `pnpm`**，而不是通过 `corepack pnpm` 调用。
+   如果 `corepack pnpm lint` 之类的命令本身能跑，但 Turbo 报
+   `Unable to find package manager binary: cannot find binary path`，
+   这是**环境前置条件**，不是产品代码问题——不要去 `packages/`/`apps/` 里找原因。
+3. `corepack enable` 是永久修法，但可能因权限不足失败（`EPERM`，需要管理员权限）。
+   **未经用户明确批准，不要修改系统 PATH、Node 安装、Corepack 安装，也不要自行提权**。
+   遇到这种情况就把现象和"需要用户跑一次管理员 `corepack enable`"如实报告，等用户处理。
+4. **仅当确有必要**时，可以在仓库外建一个临时 shim（把当前 corepack 管理的 pnpm
+   复制到一个可执行路径，再在会话里把该目录前置进 `$env:PATH`）作为**本次会话的临时兜底**。
+   这个 shim 不许提交进仓库，不许在文档里写成机器特定的绝对路径，也不许当成"解决方案"记录下来——
+   它只是绕过当前会话卡点的临时手段，下一次会话可能环境已经不同。
+   PowerShell 工具**不保留会话变量**，每次调用都要重新前置。
+
+### 其他
+
+- 包管理器是 **pnpm 9.15.4**，Node **≥22**（实测 v24.14.0 可用）。不要用 npm / yarn
 - monorepo 用 turborepo，`pnpm test` 会先 build 依赖包
 - 开发机是 **Windows 11**。`deploy/` 和 `e2e/day10/` 的 shell 脚本需要真实 Linux + systemd + root，
   **在这台机器上跑不了**，只能做静态检查（`bash -n` 语法检查）
