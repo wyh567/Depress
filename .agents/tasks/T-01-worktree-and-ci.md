@@ -259,9 +259,25 @@ function formatAffiliationLine(affiliation: { id: string; name: string; nameEn?:
 `7a59a5a51ca665c6694f0dc5be7a0fa8569406c0`）共 **7** 个提交，尚未 `push`，
 未修改任何 PR。**下一步操作是用户决定是否 push / 发起 PR review，不是继续整理工作树。**
 
-**⚠️ 已知未完成项（不视为阻塞，但需如实记录）**：原任务验收标准第 7 条要求
+**⚠️ 已知未完成项（记录保留，历史准确）**：原任务验收标准第 7 条要求
 把 `.github/workflows/ci.yml` 的 `push.branches` 从 `master` 扩展到含 `feature/**`，
-使当前分支的推送也能跑 CI。**这一步从未执行**——`.github/workflows/ci.yml` 在整个
-提交链中未被改动过。用户在本轮收尾时未将其列入最终验收范围，因此本任务标记 `DONE`，
-但这个缺口原样保留：只要不扩展 CI 触发范围，`push` 之后这条分支仍然不会自动跑 CI。
-是否补做、何时补做，由用户决定；建议记为独立的小任务，而不是重开 T-01。
+使当前分支的推送也能跑 CI。**在上面这次收尾时这一步从未执行**——`.github/workflows/ci.yml`
+在当时的整个提交链中未被改动过。用户在那一轮收尾时未将其列入最终验收范围，因此本任务
+当时标记 `DONE`，但这个缺口原样保留。
+
+---
+
+### ✅ 缺口已在最终审查阶段补齐（2026-08-07）
+
+用户在最终审查中发现验收标准第 7 条尚未闭合，要求单独处理。核实结果：
+`pull_request.branches` 与 `push.branches` 当时均**精确匹配** `master`（非 glob），
+确实未被任何等价规则覆盖 `feature/**`，因此执行最小修改：只给 `push.branches`
+新增一项 `"feature/**"`，`pull_request.branches` 保持不变（与原验收标准 #9 的
+目标描述一致："`pull_request` 保持只针对 master……`push` 增加 `feature/**`"）。
+
+提交 `e1ff2f4 fix(ci): run CI on feature branches`，净改动仅 1 行新增，
+`jobs`/`steps`/`permissions`/actions 版本、`master` 触发行为均未动。
+`pnpm lint`、`pnpm typecheck` 均通过，`git diff --check` 无告警。
+
+**原验收标准第 7 条现在真正闭合**：`push.branches` 含 `feature/**`。
+T-01 的全部原验收标准（含这一条）现在都已满足，不再有已知遗留缺口。

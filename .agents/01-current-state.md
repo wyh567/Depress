@@ -1,12 +1,13 @@
 # 当前真实状态
 
 > **活文档**。任务完成后由 agent 更新对应事实，并在 §7 追加变更记录。
-> 快照日期：**2026-08-04**，分支 `feature/phase4-mentor-mvp`，
-> 最新提交 `7a59a5a test(e2e): handle transient compile status sampling`。
+> 初次快照日期：2026-08-04，分支 `feature/phase4-mentor-mvp`，
+> 最新更新：**2026-08-07（T-01 完成后）**，产品工作树 **clean**，
+> 本地领先 upstream（`7a59a5a`）的提交链见 `.agents/tasks/T-01-worktree-and-ci.md` 完成记录。
 
 ---
 
-## 0. ⚠️ 先读这一节：三个会让你判断错误的陷阱
+## 0. ⚠️ 先读这一节：曾经会让你判断错误的陷阱（部分已解决）
 
 ### 陷阱 1：`process.md` 的 Phase 4 状态是错的
 
@@ -24,24 +25,22 @@ git log 有一整条 20+ 提交的 "mentor MVP" 工作线（`ad92770` → `7a59a
 → 在任务 `T-03` 完成前，**以本文件为准，不要照 `process.md` 的状态行做决策**。
 → `process.md` 的 Phase 1–3 历史验收记录仍然可信，只有 Phase 4 状态部分不可信。
 
-### 陷阱 2：工作树是脏的（58 个文件）
+### 陷阱 2（已解决，2026-08-07）：曾经的 58 个未提交产品改动
 
-用这条命令自检（**只数产品改动**，不受工作流文件干扰）：
+**T-01 已完成，本陷阱不再成立。** 原本 58 个未提交产品改动（`deploy/` 全部安全脚本、
+`e2e/day10/`、IEEE/GB/T 渲染器与 snapshot、双语元数据）已按意图拆分为 6 个独立提交，
+产品工作树现在是 **clean** 的。自检命令：
 
 ```bash
 git status --porcelain -- apps packages deploy e2e docs process.md architecture.md docker-compose.yml playwright.day10.config.ts | wc -l
 ```
 
-期望输出：**58**（约 43 个已修改 + 约 15 个未跟踪）。
+期望输出现在是 **0**。若不是 0，说明有新的未提交产品改动，需要按 `git status --short`
+逐条核实来源，不要假设是这批历史遗留。
 
-> `git status --short` 的**总行数**会更大，因为 `.agents/`、`CLAUDE.md`、`.claude/settings.json`
-> 这些工作流文件在被提交前也会计入。**不要拿总行数去比对 58。**
-主要涉及：`deploy/` 全部安全脚本、`e2e/day10/`、IEEE/GB/T 渲染器与 snapshot、
-双语元数据（`packages/ast/src/schema.ts`、`apps/web/stores/document-metadata.ts`）。
-
-→ 这些改动**既没进 CI，也不在 Day 10 验收的那个 SHA（`8a83cfd`）里**。
-→ 任何新改动会和这 58 个文件混在一起，diff 无法审查。
-→ **这就是 `T-01` 必须排在第一位的原因。**
+具体提交链、验证结果、ECS 隔离验证记录见
+[`tasks/T-01-worktree-and-ci.md`](tasks/T-01-worktree-and-ci.md) 完成记录。
+这些提交**目前仅存在本地，尚未 `push`**——克隆远程仓库仍看不到它们，直到用户决定推送。
 
 ### 陷阱 3：Day 10 "验收通过" 不等于"已上线"
 
@@ -69,7 +68,7 @@ git status --porcelain -- apps packages deploy e2e docs process.md architecture.
 | 任务 | process.md 声明 | 代码实际 | 证据 / 缺口 |
 |---|---|---|---|
 | P4-00 架构冻结 | COMPLETE | ✅ COMPLETE | 7 份 ADR |
-| P4-01 CI baseline | COMPLETE | ⚠️ 部分 | `.github/workflows/ci.yml` 存在，但**只在 master 触发**，当前分支不跑 CI |
+| P4-01 CI baseline | COMPLETE | ✅ 完成（2026-08-07） | `.github/workflows/ci.yml` 的 `push` 现覆盖 `master` + `feature/**`；`pull_request` 仍只对 `master`（按原验收标准设计如此） |
 | P4-02 沙箱 spike | NOT STARTED | ✅ 实质完成 | Day 10 真实 Linux 跑通；但 **ADR 0007 仍是 `Proposed`** |
 | P4-03 共享契约 | NOT STARTED | ✅ 完成 | `persisted-document.ts` / `compile.ts`(快照+指针) / `document-api.ts` / `reference-api.ts` |
 | P4-04 Postgres | NOT STARTED | ✅ 完成 | 5 个迁移，带 CHECK 约束与部分索引 |
@@ -89,7 +88,7 @@ git status --porcelain -- apps packages deploy e2e docs process.md architecture.
 | 能力 | 状态 | 证据 |
 |---|---|---|
 | 结构化编辑（heading 1–3 / 段落 / 语义粗斜体 / citation 原子节点） | 可用 | `apps/web/components/editor/*` + `editor-schema.test.ts` |
-| 双语学术元数据（title/titleEn、abstract/abstractEn、keywords/keywordsEn、作者与单位 nameEn） | 可用（**未提交**） | `packages/ast/src/schema.ts` `DocMetadataSchema`；`document-metadata-panel.tsx` 有对应输入框 |
+| 双语学术元数据（title/titleEn、abstract/abstractEn、keywords/keywordsEn、作者与单位 nameEn） | 可用（**已提交，本地未 push**） | `packages/ast/src/schema.ts` `DocMetadataSchema`；`document-metadata-panel.tsx` 有对应输入框 |
 | 引用库 CRUD + BibTeX 导入 | 可用 | `components/library/bibtex-to-csl.ts` + tests |
 | DOI → CSL-JSON | 可用 | `POST /references/doi/lookup` 薄 BFF，固定 Crossref origin，8s 超时 / 2 次重试 / 6 个安全错误码 |
 | 三模板导出 IEEE / Elsevier / GB/T 7714 | 可用 | Phase 3 exit smoke + Day 10 复用证据（14,446 / 19,362 / 24,976 bytes，均单页） |
@@ -173,16 +172,16 @@ PDF 永久留在桶里。
 
 → **任务 `T-03`**
 
-### 🟡 测试债
+### 🟡 测试债（部分已解决，2026-08-07）
 
 - 62 个测试文件，单测/集成质量高（每边界重校验、含负例、含幂等/并发用例）
 - 但**所有真实基础设施测试都是 opt-in 且 CI 默认跳过**（清单见 `02-agent-rules.md` §5）
-- CI **只在 master 的 PR/push 触发**，当前分支推送不跑 CI
+- ✅ CI 现在 `push` 到 `feature/**` 也会触发（原缺口，已在 T-01 收尾时补齐）
 - Day 10 E2E 需要真实 Linux + root + systemd，**Windows 开发机跑不了**
 - 验收文档自述 "Full 457-test suite: intentionally not run"
-- **58 个文件未提交**，既没进 CI 也不在验收 SHA 里
+- ✅ 原先 58 个未提交文件已按意图拆分提交，工作树已 clean（`T-01` `DONE`）
 
-→ **任务 `T-01`**
+→ **`T-01` 已完成**；下一个任务见 `03-task-board.md`
 
 ### 🟡 文档与代码不一致（汇总）
 
@@ -247,3 +246,4 @@ PDF 永久留在桶里。
 | 日期 | 变更 | 由谁 |
 |---|---|---|
 | 2026-08-04 | 初次建立（基于只读分析） | 分析会话 |
+| 2026-08-07 | T-01 完成后同步：58 个未提交产品改动已拆分为独立提交、工作树 clean、CI 现覆盖 `feature/**` push。更新 §0 陷阱 2、§1 P4-01 行、§2 双语元数据行、§3 测试债段落。提交链本身仍未 `push`，其余缺口（P4-02~P4-12 其余状态、遗留 `POST /compile`、P4-10 安全空白等）未受影响，原样保留 | T-01 收尾会话 |
