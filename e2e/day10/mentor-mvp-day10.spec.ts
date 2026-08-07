@@ -20,7 +20,7 @@ import {
 } from "./compile-status-observation";
 
 const EXACT_COMMIT = requiredEnv("DAY10_CANDIDATE_SHA");
-const externalRoot = "D:\\depress-day10-wsl";
+const externalRoot = process.env.DAY10_EXTERNAL_ROOT ?? "D:\\depress-day10-wsl";
 const artifactDir = join(externalRoot, "artifacts");
 const testMode = process.env.DAY10_MODE ?? "full";
 const runsCoreAcceptance = [
@@ -47,7 +47,9 @@ const resultFile = join(
               ? "smoke-results.json"
               : "acceptance-results.json"
 );
-const controlScript = "/mnt/d/depress/e2e/day10/staging-control.sh";
+const controlScript =
+  process.env.DAY10_CONTROL_SCRIPT ?? "/mnt/d/depress/e2e/day10/staging-control.sh";
+const controlMode = process.env.DAY10_CONTROL_MODE ?? "wsl";
 const IEEE_HEADING_PREFIX = "I)";
 
 function normalizeSemanticHeading(value: string): string {
@@ -282,11 +284,16 @@ function assertCitationBoundary(
 }
 
 function control(command: string, ...args: string[]): string {
-  const result = spawnSync(
-    "wsl.exe",
-    ["-d", "DePress-Day10", "--exec", "bash", controlScript, command, ...args],
-    { encoding: "utf8", timeout: 120_000, windowsHide: true }
-  );
+  const executable = controlMode === "native" ? "bash" : "wsl.exe";
+  const controlArgs =
+    controlMode === "native"
+      ? [controlScript, command, ...args]
+      : ["-d", "DePress-Day10", "--exec", "bash", controlScript, command, ...args];
+  const result = spawnSync(executable, controlArgs, {
+    encoding: "utf8",
+    timeout: 120_000,
+    windowsHide: true,
+  });
   if (result.status !== 0) {
     throw new Error(`staging-control ${command} failed: ${result.stderr.trim()}`);
   }

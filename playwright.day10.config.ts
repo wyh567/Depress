@@ -1,7 +1,8 @@
 import { defineConfig } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
-const envFile = process.env.DAY10_E2E_ENV_FILE ?? "D:\\depress-day10-wsl\\e2e.env";
+const externalRoot = process.env.DAY10_EXTERNAL_ROOT ?? "D:\\depress-day10-wsl";
+const envFile = process.env.DAY10_E2E_ENV_FILE ?? `${externalRoot}\\e2e.env`;
 
 for (const rawLine of readFileSync(envFile, "utf8").split(/\r?\n/u)) {
   const line = rawLine.trim();
@@ -27,7 +28,7 @@ for (const key of required) {
 
 export default defineConfig({
   testDir: "./e2e/day10",
-  outputDir: "D:\\depress-day10-wsl\\test-results",
+  outputDir: process.env.DAY10_TEST_OUTPUT_DIR ?? `${externalRoot}\\test-results`,
   fullyParallel: false,
   workers: 1,
   retries: 0,
@@ -43,10 +44,13 @@ export default defineConfig({
     trace: process.env.DAY10_TRACE === "retain-on-failure" ? "retain-on-failure" : "off",
     screenshot: "off",
     video: "off",
-    launchOptions: {
-      executablePath:
-        process.env.DAY10_CHROMIUM_EXECUTABLE ??
-        "D:\\depress-day10-wsl\\ms-playwright\\chromium_headless_shell-1234\\chrome-headless-shell-win64\\chrome-headless-shell.exe",
-    },
+    launchOptions: process.env.DAY10_CHROMIUM_EXECUTABLE
+      ? { executablePath: process.env.DAY10_CHROMIUM_EXECUTABLE }
+      : process.platform === "win32"
+        ? {
+            executablePath:
+              "D:\\depress-day10-wsl\\ms-playwright\\chromium_headless_shell-1234\\chrome-headless-shell-win64\\chrome-headless-shell.exe",
+          }
+        : undefined,
   },
 });
