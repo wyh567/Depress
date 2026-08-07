@@ -7,7 +7,7 @@
 以下操作**任何情况下都不许自己发起**，必须由用户明确指示：
 
 - `git commit` / `git push` / `git merge` / `git rebase` / `git reset` / `git restore` / `git checkout -- <file>`
-- `git stash`（会让 58 个未提交改动消失在视野外）
+- `git stash`（会让未提交改动消失在当前工作树视野外）
 - 修改、关闭、合并任何 Pull Request
 - 删除 `output/`、`tmp/`、`.env` 之外的任何文件
 - 在 `packages/ast` 里新增或修改 schema **而不同步更新 web + api 两侧消费者和测试**

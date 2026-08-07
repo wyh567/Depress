@@ -239,9 +239,12 @@ function formatAffiliationLine(affiliation: { id: string; name: string; nameEn?:
 | 4 | `fa4977a` | `feat(deploy): complete hardened single-VM production topology with Web tier` |
 | 5 | `b29126d` | `feat(e2e): add operator validation bundle generator` |
 | 6 | `516c20c` | `refactor(e2e): make Day10 harness environment-overridable` |
-| 7 | `516c20c` 之后 | `docs(agents): close T-01 and record validated workflow state`（本提交） |
+| 7 | `f9626f0` | `docs(agents): close T-01 and record validated workflow state` |
+| 8 | `e1ff2f4` | `fix(ci): run CI on feature branches` |
+| 9 | `aaf3685` | `docs(agents): synchronize current state after T-01 completion` |
 
-原始 58 个未提交产品改动，按意图拆分为提交 1–6（提交 7 是本次 `.agents` 状态收尾）。
+原始 58 个未提交产品改动，按意图拆分为提交 1–6（提交 7 是 `.agents` 状态收尾，
+提交 8 补齐 CI 触发范围，提交 9 同步 Agent 当前状态文档）。
 每个提交的详细分组理由、staging 决策、ECS 隔离验证过程见本轮会话记录；
 本文件只保留后续 agent 需要的结论，不复制过程。
 
@@ -255,9 +258,10 @@ function formatAffiliationLine(affiliation: { id: string; name: string; nameEn?:
 本会话内确认目录仍存在、未被清理。具体路径与主机身份属操作细节，不记录在本文件
 （避免把机器/网络专属信息固化进仓库）。
 
-**当前 Git 状态**：分支 `feature/phase4-mentor-mvp` 本地领先 `origin`（`upstream` 仍指向
-`7a59a5a51ca665c6694f0dc5be7a0fa8569406c0`）共 **7** 个提交，尚未 `push`，
-未修改任何 PR。**下一步操作是用户决定是否 push / 发起 PR review，不是继续整理工作树。**
+**当前 Git 状态**（截至 `aaf3685` 时点的 T-01 最终快照）：分支 `feature/phase4-mentor-mvp`
+本地领先 `origin`（`upstream` 仍指向 `7a59a5a51ca665c6694f0dc5be7a0fa8569406c0`）
+共 **9** 个提交，尚未 `push`，未修改任何 PR。
+**下一步操作是用户决定是否 push / 发起 PR review，不是继续整理工作树。**
 
 **⚠️ 已知未完成项（记录保留，历史准确）**：原任务验收标准第 7 条要求
 把 `.github/workflows/ci.yml` 的 `push.branches` 从 `master` 扩展到含 `feature/**`，
