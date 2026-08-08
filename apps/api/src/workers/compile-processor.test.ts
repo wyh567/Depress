@@ -1,10 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
-import {
-  artifactKeyForJob,
-  processCompileJob,
-  type ArtifactUploader,
-} from "./compile-processor";
+import { artifactKeyForJob, processCompileJob, type ArtifactUploader } from "./compile-processor";
 import { createJobStore } from "../services/job-store";
 import type { TypstSandboxRunner } from "./typst-sandbox";
 import type { TypstCompileProject } from "@depress/transformers";
@@ -36,17 +34,14 @@ const validPayload = () => ({
 });
 
 function fakeSandbox(
-  impl: (project: TypstCompileProject) => Promise<Buffer> = async () =>
-    Buffer.from("%PDF"),
+  impl: (project: TypstCompileProject) => Promise<Buffer> = async () => Buffer.from("%PDF")
 ) {
   const compile = vi.fn(impl);
   const sandbox: TypstSandboxRunner = { compile };
   return { sandbox, compile };
 }
 
-function fakeArtifacts(
-  impl: (key: string, pdf: Buffer) => Promise<void> = async () => {},
-) {
+function fakeArtifacts(impl: (key: string, pdf: Buffer) => Promise<void> = async () => {}) {
   const uploadArtifact = vi.fn(impl);
   const artifacts: ArtifactUploader = { uploadArtifact };
   return { artifacts, uploadArtifact };
@@ -61,7 +56,7 @@ describe("processCompileJob", () => {
         ...validPayload(),
         ast: { type: "doc", content: [{ type: "heading", level: 4 }] },
       },
-      { sandbox, artifacts },
+      { sandbox, artifacts }
     );
     expect(outcome).toEqual({ status: "failed", error: "INVALID_AST" });
     expect(compile).not.toHaveBeenCalled();
@@ -76,7 +71,7 @@ describe("processCompileJob", () => {
         ...validPayload(),
         references: [{ id: "   ", type: "book", title: "T" }],
       },
-      { sandbox, artifacts },
+      { sandbox, artifacts }
     );
     expect(outcome).toEqual({ status: "failed", error: "INVALID_AST" });
     expect(compile).not.toHaveBeenCalled();
@@ -111,9 +106,7 @@ describe("processCompileJob", () => {
     expect(source).not.toContain("[1]");
     // Body is injected into the built-in IEEE template, not sent bare.
     expect(source).toContain("DePress Draft");
-    expect(source).toContain(
-      '#bibliography("references.yml", title: [References], style: "ieee")',
-    );
+    expect(source).toContain('#bibliography("references.yml", title: [References], style: "ieee")');
   });
 
   it("rejects a missing cited reference as INVALID_AST before compilation", async () => {
@@ -121,7 +114,7 @@ describe("processCompileJob", () => {
     const { artifacts, uploadArtifact } = fakeArtifacts();
     const outcome = await processCompileJob(
       { ...validPayload(), references: [] },
-      { sandbox, artifacts },
+      { sandbox, artifacts }
     );
     expect(outcome).toEqual({ status: "failed", error: "INVALID_AST" });
     expect(compile).not.toHaveBeenCalled();
@@ -155,7 +148,7 @@ describe("processCompileJob", () => {
     });
     expect(uploadArtifact).toHaveBeenCalledWith(
       `artifacts/${payload.jobId}.pdf`,
-      expect.any(Buffer),
+      expect.any(Buffer)
     );
     // Signed URLs are minted on read by the API, never by the worker.
     expect(outcome).not.toHaveProperty("downloadUrl");
@@ -194,20 +187,29 @@ describe("processCompileJob", () => {
     // though the artifact upload fails afterwards.
     const fs = await import("node:fs/promises");
     const { join } = await import("node:path");
-    const { createTypstSandboxRunner, SANDBOX_OUTPUT_FILE } = await import(
-      "./typst-sandbox"
-    );
+    const { createTypstSandboxRunner, SANDBOX_OUTPUT_FILE } = await import("./typst-sandbox");
     const dirs: string[] = [];
     const sandbox = createTypstSandboxRunner({
-      runner: async (_cmd, args) => {
+      spawnProcess: (_cmd, args) => {
         // -v mount is "<workDir>:/work"; lastIndexOf handles Windows drive colons.
         const mount = args[args.indexOf("-v") + 1] ?? "";
         const workDir = mount.slice(0, mount.lastIndexOf(":"));
         dirs.push(workDir);
-        await fs.writeFile(
-          join(workDir, SANDBOX_OUTPUT_FILE),
-          Buffer.from("%PDF"),
-        );
+        const child = new EventEmitter() as EventEmitter & {
+          stdout: PassThrough;
+          stderr: PassThrough;
+          kill(signal: NodeJS.Signals): boolean;
+        };
+        child.stdout = new PassThrough();
+        child.stderr = new PassThrough();
+        child.kill = () => true;
+        queueMicrotask(() => {
+          void Promise.all([
+            fs.writeFile(args[args.indexOf("--cidfile") + 1] ?? "", "b".repeat(64)),
+            fs.writeFile(join(workDir, SANDBOX_OUTPUT_FILE), Buffer.from("%PDF")),
+          ]).then(() => child.emit("close", 0, null));
+        });
+        return child;
       },
     });
     const { artifacts } = fakeArtifacts(async () => {
@@ -230,10 +232,7 @@ describe("processCompileJob", () => {
     const job = store.create({ templateId: "ieee", format: "pdf" });
     const deps = { ...fakeSandbox(), ...fakeArtifacts() };
 
-    const ok = await processCompileJob(
-      { ...validPayload(), jobId: job.id },
-      deps,
-    );
+    const ok = await processCompileJob({ ...validPayload(), jobId: job.id }, deps);
     if (ok.status !== "succeeded") throw new Error("expected success");
     store.setStatus(job.id, ok.status, { artifactKey: ok.artifactKey });
     expect(store.get(job.id)?.status).toBe("succeeded");
@@ -252,7 +251,7 @@ describe("Elsevier worker dispatch", () => {
     const { artifacts } = fakeArtifacts();
     const outcome = await processCompileJob(
       { ...validPayload(), templateId: "elsevier" },
-      { sandbox, artifacts },
+      { sandbox, artifacts }
     );
     expect(outcome.status).toBe("succeeded");
     const source = compile.mock.calls[0]?.[0]?.main ?? "";
@@ -267,7 +266,7 @@ describe("GB/T worker dispatch", () => {
     const { artifacts } = fakeArtifacts();
     const outcome = await processCompileJob(
       { ...validPayload(), templateId: "gbt7714" },
-      { sandbox, artifacts },
+      { sandbox, artifacts }
     );
     expect(outcome.status).toBe("succeeded");
     const source = compile.mock.calls[0]?.[0]?.main ?? "";
