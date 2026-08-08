@@ -1,9 +1,11 @@
 # .cursorrules — DePress Project
 
 ## Context Protocol
-- Read `architecture.md` and `process.md` BEFORE any task. They are the source of truth.
-- Only work on the current Phase in `process.md`. Refuse scope creep; note out-of-phase ideas in the "Backlog" section instead of implementing.
-- After completing a TODO item, update `process.md` (check the box, bump Last Updated). Do this in the same session.
+- **START HERE: read `.agents/README.md` and follow its mandated reading order BEFORE any task.**
+- Read `architecture.md` BEFORE any task. It is the architectural source of truth.
+- ⚠️ `process.md`'s **Phase 4 status section is currently stale** (it claims P4-02..P4-12 are NOT STARTED; most are implemented). Use `.agents/01-current-state.md` for status until task `T-03` fixes it. `process.md`'s Phase 1–3 acceptance records remain trustworthy.
+- Work only on the current task in `.agents/03-task-board.md`. Refuse scope creep; record out-of-phase ideas in that file's "发现待办" section instead of implementing.
+- After completing a task, update `.agents/03-task-board.md` and `.agents/01-current-state.md` in the same session.
 
 ## Output Discipline (token economy)
 - No apologies, no preamble, no summaries of what you just did unless asked.

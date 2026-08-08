@@ -1,5 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalEnv": ["DEPRESS_API_ORIGIN"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

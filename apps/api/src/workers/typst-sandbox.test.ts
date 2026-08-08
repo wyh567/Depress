@@ -1,10 +1,10 @@
 import { EventEmitter } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderIeeeTypstProject } from "@depress/transformers";
 import {
   DEFAULT_TYPST_IMAGE,
@@ -182,10 +182,8 @@ describe("Docker container identity", () => {
     ["unsafe UID", { uid: Number.MAX_SAFE_INTEGER + 1, gid: 125 }],
     ["non-numeric GID", { uid: 124, gid: "125" as unknown as number }],
   ])("rejects an invalid runtime identity before run setup: %s", async (_name, identity) => {
-    const before = new Set(
-      (await readdir(tmpdir())).filter((name) => name.startsWith("depress-typst-"))
-    );
     let runIdCalls = 0;
+    let runDirectoryCalls = 0;
     const { spawnProcess, calls } = spawnHarness(() => undefined);
     await expect(
       createTypstSandboxRunner({
@@ -195,14 +193,15 @@ describe("Docker container identity", () => {
           runIdCalls += 1;
           return RUN_ID;
         },
+        createRunDirectory: async () => {
+          runDirectoryCalls += 1;
+          return join(tmpdir(), "must-not-be-created");
+        },
       }).compile({ main: "identity must not affect this content" })
     ).rejects.toThrow("Sandbox runtime identity resolution failed");
-    const after = new Set(
-      (await readdir(tmpdir())).filter((name) => name.startsWith("depress-typst-"))
-    );
     expect(runIdCalls).toBe(0);
+    expect(runDirectoryCalls).toBe(0);
     expect(calls).toHaveLength(0);
-    expect(after).toEqual(before);
   });
 
   it("accepts only a full lowercase 64-hex Docker container ID", () => {
@@ -334,6 +333,11 @@ describe("Docker container identity", () => {
 });
 
 describe("createTypstSandboxRunner lifecycle", () => {
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
   it("returns the PDF, uses no shell, skips force cleanup, and removes temp files", async () => {
     let workDir = "";
     const { spawnProcess, calls } = spawnHarness(async ({ args, child }) => {
@@ -394,24 +398,37 @@ describe("createTypstSandboxRunner lifecycle", () => {
   });
 
   it("sends SIGTERM on timeout, skips SIGKILL when the CLI exits, then cleans the exact CID", async () => {
+    vi.useFakeTimers();
     let runChild: FakeChild | undefined;
-    const { spawnProcess, calls } = spawnHarness(async ({ args, child }) => {
+    let confirmRunSpawned: () => void = () => undefined;
+    const runSpawned = new Promise<void>((resolve) => {
+      confirmRunSpawned = resolve;
+    });
+    const calls: SpawnCall[] = [];
+    const spawnProcess: SpawnProcess = (command, args, options) => {
+      const child = new FakeChild();
+      calls.push({ command, args, options, child });
       if (args[0] === "run") {
         runChild = child;
-        await writeFile(argValue(args, "--cidfile"), CID);
+        writeFileSync(argValue(args, "--cidfile"), CID, "utf8");
         child.onKill = (signal) => {
           if (signal === "SIGTERM") child.close(null, "SIGTERM");
         };
+        confirmRunSpawned();
       } else {
-        child.close(0);
+        queueMicrotask(() => child.close(0));
       }
-    });
-    const error = await createTypstSandboxRunner({
+      return child;
+    };
+    const compile = createTypstSandboxRunner({
       spawnProcess,
       timings: fastTimings(),
     })
       .compile({ main: "slow" })
       .catch((value: unknown) => value);
+    await runSpawned;
+    await vi.advanceTimersByTimeAsync(fastTimings().executionTimeoutMs);
+    const error = await compile;
     expect(runChild?.signals).toEqual(["SIGTERM"]);
     expect((error as SandboxCompileError).details).toMatchObject({
       reason: "docker-timeout",
@@ -426,24 +443,37 @@ describe("createTypstSandboxRunner lifecycle", () => {
   });
 
   it("escalates once to SIGKILL when the Docker CLI ignores SIGTERM", async () => {
+    vi.useFakeTimers();
     let runChild: FakeChild | undefined;
-    const { spawnProcess } = spawnHarness(async ({ args, child }) => {
+    let confirmRunSpawned: () => void = () => undefined;
+    const runSpawned = new Promise<void>((resolve) => {
+      confirmRunSpawned = resolve;
+    });
+    const spawnProcess: SpawnProcess = (_command, args) => {
+      const child = new FakeChild();
       if (args[0] === "run") {
         runChild = child;
-        await writeFile(argValue(args, "--cidfile"), CID);
+        writeFileSync(argValue(args, "--cidfile"), CID, "utf8");
         child.onKill = (signal) => {
           if (signal === "SIGKILL") child.close(null, "SIGKILL");
         };
+        confirmRunSpawned();
       } else {
-        child.close(0);
+        queueMicrotask(() => child.close(0));
       }
-    });
-    const error = await createTypstSandboxRunner({
+      return child;
+    };
+    const compile = createTypstSandboxRunner({
       spawnProcess,
       timings: fastTimings(),
     })
       .compile({ main: "slow" })
       .catch((value: unknown) => value);
+    await runSpawned;
+    await vi.advanceTimersByTimeAsync(fastTimings().executionTimeoutMs);
+    expect(runChild?.signals).toEqual(["SIGTERM"]);
+    await vi.advanceTimersByTimeAsync(fastTimings().termGraceMs);
+    const error = await compile;
     expect(runChild?.signals).toEqual(["SIGTERM", "SIGKILL"]);
     expect((error as SandboxCompileError).details).toMatchObject({
       dockerCliClosed: true,

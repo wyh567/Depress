@@ -30,29 +30,36 @@ export function renderValidatedElsevierTypstDocument(
       index + 1,
     ]),
   );
+  // English-primary manuscript: prefer English display fields when present.
   const authors = (metadata?.authors ?? [])
     .map((author) => {
-      const numbers = (author.affiliationIds ?? []).map(
-        (id) => affiliationNumberById.get(id)!,
-      );
+      const displayName = author.nameEn ?? author.name;
+      const numbers = (author.affiliationIds ?? [])
+        .map((id) => affiliationNumberById.get(id))
+        .filter((n): n is number => n !== undefined);
       const markers = numbers.length > 0 ? `#super[${numbers.join(", ")}]` : "";
-      return `${escapeTypst(author.name)}${markers}`;
+      return `${escapeTypst(displayName)}${markers}`;
     })
     .join(", ");
   const affiliations = (metadata?.affiliations ?? [])
-    .map((affiliation, index) => `#super[${index + 1}] ${escapeTypst(affiliation.name)}`)
-    .join("\n");
-  const abstract = metadata?.abstract
-    ? `#strong[Abstract]\n\n${escapeTypst(metadata.abstract)}`
+    .map((affiliation, index) => {
+      const displayName = affiliation.nameEn ?? affiliation.name;
+      return `#super[${index + 1}] ${escapeTypst(displayName)}`;
+    })
+    .join(" \\\n");
+  const abstractText = metadata?.abstractEn ?? metadata?.abstract;
+  const abstract = abstractText
+    ? `#strong[Abstract]\n\n${escapeTypst(abstractText)}`
     : "";
-  const keywords = metadata?.keywords?.length
-    ? `#strong[Keywords]\n\n${metadata.keywords.map(escapeTypst).join(", ")}`
+  const keywordList = metadata?.keywordsEn ?? metadata?.keywords;
+  const keywords = keywordList?.length
+    ? `#strong[Keywords]\n\n${keywordList.map(escapeTypst).join(", ")}`
     : "";
   const bibliography = withBibliography
     ? `#bibliography("${TYPST_BIBLIOGRAPHY_FILE}", title: [References], style: "elsevier-harvard")`
     : "";
   const replacements: Record<ElsevierPlaceholder, string> = {
-    title: escapeTypst(metadata?.title ?? FALLBACK_TITLE),
+    title: escapeTypst(metadata?.titleEn ?? metadata?.title ?? FALLBACK_TITLE),
     authors,
     affiliations,
     abstract,

@@ -31,17 +31,33 @@ const ARTIFACT_PATHS = {
 const ast = {
   type: "doc" as const,
   metadata: {
-    title: "Phase 3 Three-Template Exit Smoke",
+    title: "三模板退出冒烟",
+    titleEn: "Phase 3 Three-Template Exit Smoke",
     authors: [
-      { name: "Ada Lovelace", affiliationIds: ["aff-en"] },
-      { name: "张伟", affiliationIds: ["aff-zh"] },
+      {
+        name: "Ada Lovelace",
+        nameEn: "Ada Lovelace",
+        affiliationIds: ["aff-en"],
+      },
+      { name: "张伟", nameEn: "ZHANG Wei", affiliationIds: ["aff-zh"] },
     ],
     affiliations: [
-      { id: "aff-en", name: "Computational Publishing Lab" },
-      { id: "aff-zh", name: "数字出版研究中心" },
+      {
+        id: "aff-en",
+        name: "计算出版实验室",
+        nameEn: "Computational Publishing Lab",
+      },
+      {
+        id: "aff-zh",
+        name: "数字出版研究中心",
+        nameEn: "Digital Publishing Research Center",
+      },
     ],
-    abstract: "One semantic document is exported through all immutable Phase 3 templates.",
-    keywords: ["citations", "templates", "smoke"],
+    abstract: "同一语义文档经全部不可变 Phase 3 模板导出。",
+    abstractEn:
+      "One semantic document is exported through all immutable Phase 3 templates.",
+    keywords: ["引用", "模板", "冒烟"],
+    keywordsEn: ["citations", "templates", "smoke"],
   },
   content: [{
     type: "paragraph" as const,
@@ -141,6 +157,18 @@ describe.skipIf(process.env["DEPRESS_PHASE3_EXIT_SMOKE"] !== "1")(
           '#cite(label("a"))',
           '#cite(label("c"))',
         ]);
+        if (templateId === "gbt7714") {
+          expect(project.main).toContain("三模板退出冒烟");
+          expect(project.main).toMatch(/Phase 3 Three\\?-Template Exit Smoke/);
+          expect(project.main).toContain("#strong[摘要：]");
+          expect(project.main).toContain("#strong[Abstract:]");
+          expect(project.main).toContain("ZHANG Wei");
+        }
+        if (templateId === "ieee" || templateId === "elsevier") {
+          expect(project.main).toMatch(/Phase 3 Three\\?-Template Exit Smoke/);
+          expect(project.main).toContain("ZHANG Wei");
+          expect(project.main).not.toContain("三模板退出冒烟");
+        }
         const bibliography = project.bibliography ?? "";
         const aIndex = bibliography.indexOf('"a":');
         const bIndex = bibliography.indexOf('"b":');

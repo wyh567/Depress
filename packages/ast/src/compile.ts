@@ -76,6 +76,96 @@ export const CompileRequestSchema = z
   .superRefine(validateCompileReferences);
 export type CompileRequest = z.infer<typeof CompileRequestSchema>;
 
+export const CompileJobCreateRequestSchema = z
+  .object({
+    documentId: z.string().uuid(),
+    revision: z.number().int().positive(),
+    templateId: CompileTemplateIdSchema,
+    format: CompileFormatSchema,
+  })
+  .strict();
+export type CompileJobCreateRequest = z.infer<
+  typeof CompileJobCreateRequestSchema
+>;
+
+export const CompileSnapshotSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    documentId: z.string().uuid(),
+    revision: z.number().int().positive(),
+    projectId: z.string().uuid(),
+    compileRequest: CompileRequestSchema,
+  })
+  .strict();
+export type CompileSnapshot = z.infer<typeof CompileSnapshotSchema>;
+
+export const CompileQueuePointerSchema = z
+  .object({
+    jobId: z.string().uuid(),
+    snapshotHash: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .strict();
+export type CompileQueuePointer = z.infer<typeof CompileQueuePointerSchema>;
+
+export const PersistedCompileJobStatusSchema = z.enum([
+  "accepted",
+  "queued",
+  "processing",
+  "succeeded",
+  "failed",
+]);
+export type PersistedCompileJobStatus = z.infer<
+  typeof PersistedCompileJobStatusSchema
+>;
+
+export const PersistedCompileJobErrorCodeSchema = z.enum([
+  "QUEUE_UNAVAILABLE",
+  "SNAPSHOT_HASH_MISMATCH",
+  "SNAPSHOT_INVALID",
+  "COMPILE_FAILED",
+  "UPLOAD_FAILED",
+  "JOB_STATE_INVALID",
+]);
+export type PersistedCompileJobErrorCode = z.infer<
+  typeof PersistedCompileJobErrorCodeSchema
+>;
+
+export const PersistedCompileJobResourceSchema = z
+  .object({
+    jobId: z.string().uuid(),
+    documentId: z.string().uuid(),
+    revision: z.number().int().positive(),
+    templateId: CompileTemplateIdSchema,
+    format: CompileFormatSchema,
+    snapshotHash: z.string().regex(/^[0-9a-f]{64}$/),
+    status: PersistedCompileJobStatusSchema,
+    createdAt: z.string().datetime({ offset: true }),
+    updatedAt: z.string().datetime({ offset: true }),
+  })
+  .strict();
+export type PersistedCompileJobResource = z.infer<
+  typeof PersistedCompileJobResourceSchema
+>;
+
+export const CompileJobDownloadResponseSchema = z
+  .object({
+    downloadUrl: z.string().url(),
+  })
+  .strict();
+export type CompileJobDownloadResponse = z.infer<
+  typeof CompileJobDownloadResponseSchema
+>;
+
+export const CompileJobNotReadyResponseSchema = z
+  .object({
+    error: z.literal("COMPILE_JOB_NOT_READY"),
+    status: PersistedCompileJobStatusSchema,
+  })
+  .strict();
+export type CompileJobNotReadyResponse = z.infer<
+  typeof CompileJobNotReadyResponseSchema
+>;
+
 // BullMQ job data. Same content fields as the request plus the job id
 // assigned by the API. Worker re-parses this after dequeue.
 export const CompileJobPayloadSchema = z

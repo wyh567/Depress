@@ -1,6 +1,22 @@
 # Local round-trip infra: Redis (BullMQ) + MinIO (S3-compatible artifacts).
 # Usage: docker compose up -d && cp .env.example .env
 services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: depress
+      POSTGRES_USER: depress
+      POSTGRES_PASSWORD: depress-secret
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U depress -d depress"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
   redis:
     image: redis:7-alpine
     ports:
@@ -47,4 +63,5 @@ services:
       "
 
 volumes:
+  postgres-data:
   minio-data:

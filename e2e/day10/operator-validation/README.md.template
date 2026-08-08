@@ -1,0 +1,99 @@
+# DePress target validation operator bundle
+
+`NON_CANDIDATE_DIRTY_TREE_VALIDATION`
+
+This bundle restores the reviewed dirty deployment/Harness tree on baseline
+`@@BASELINE_SHA@@`. It does not create a commit, modify the branch or PR,
+change DNS, request a public certificate, or open a cloud security-group port.
+
+The target resource gates use exact kernel values:
+
+- `MemTotal` from `/proc/meminfo` must be at least 3407872 kB (3.25 GiB).
+  Cloud VM firmware and kernel reservations mean a nominal 4 GiB VM does not
+  necessarily expose a full 4 GiB through Linux `MemTotal`. This floor still
+  rejects a 3 GiB class or clearly undersized host. It is not an available-RAM
+  threshold; the full Smoke continues to expose OOM, swap, and resource
+  pressure.
+- `nproc` must report at least 2 CPUs.
+- enabled swap from `/proc/swaps` must total at least 1610612736 bytes.
+- `df -B1 -P /` must report at least 21474836480 available bytes.
+- architecture must be x86_64, the OS Ubuntu 22.04, and the later systemd gate
+  must report major version 249.
+
+The validation fails closed for unknown listeners, identities, units, releases,
+configuration, runtime paths, evidence paths, or ownership markers.
+
+The production Web unit is statically checked with systemd 249 under a
+replacement `SYSTEMD_UNIT_PATH` containing only `depress-web.service` and the
+minimal controlled `sysinit.target` and `network-online.target` stubs. The
+analyzer must return zero with no diagnostics. Unrelated host units cannot
+enter that graph, while target-unit directives, dependencies, executable and
+path contracts remain fail-closed. Afterward the real disposable unit is
+installed and started; status, journal, ExecStart result, loopback listener,
+and Web-root evidence are captured without copying environment-file contents.
+The Web, API, Outbox, Worker, and Migration identities keep private primary
+groups and share only the supplemental `depress-release` read group. The
+Release is normalized to root ownership with `0750` directories, `0640`
+ordinary files, and `0750` pre-existing executables; pnpm package imports are
+copies, and every symlink must resolve inside that Release.
+
+Journal collection is bound to a cursor recorded immediately before service
+start and to the unit Invocation ID. Timestamp parsing is not used. A capture
+failure is recorded separately as `diagnostic_capture_status=FAILURE`.
+
+## Workbench execution
+
+Upload the matching `.tar.gz` and `.tar.gz.sha256`, then run the commands from
+the operator handoff. Run `bash verify-bundle.sh` before
+`bash depress-target-validate.sh`.
+
+Minimal durable evidence is initialized before bundle integrity and target
+preflight. A pre-marker failure records:
+
+```text
+owned_resources_created=false
+cleanup_status=cleanup_not_required_no_owned_resources_created
+```
+
+Do not run cleanup in that case. Direct cleanup without the exact root-owned,
+0600, non-symlink marker intentionally refuses to delete anything. When
+`owned_resources_created=true`, cleanup is marker-bound and may be run with:
+
+```bash
+bash depress-target-cleanup.sh
+```
+
+The transfer archive records its single top-level directory as `root:root`
+`0700`. The validation script independently rejects any bundle-directory chain
+that is writable by group or others.
+
+Every disposable identity check uses the audited identity runner, changes to
+`/`, and executes an absolute command with a minimal trusted environment. A
+service identity never inherits this root-only Bundle directory as its cwd.
+
+Every success or failure produces `operator-result-<run-id>.tar.gz` and a
+matching `.sha256`. Download and return only that sanitized result archive;
+never return `evidence/root-only-*`, environment files, cookies, database URLs,
+signed URLs, generated credentials, passwords, private keys, or IPs.
+When Release checks have started, the allowlist also includes the sanitized
+`identity-check-summary.txt`.
+
+## Bundle layout
+
+- `baseline.sha256`: required baseline commit
+- `baseline.tar`: clean baseline source without `.git`
+- `dirty-tree.patch`: binary-safe tracked-file patch
+- `new-files/`: complete untracked-file payload
+- `changed-files.txt`: exact modified/new path set
+- `new-files.txt`: exact new-file path set
+- `changed-files.sha256`: worktree SHA-256 for every changed/new file
+- `changed-files.mode`: exact `0644`/`0755` Unix mode for every changed/new file
+- `payload.sha256`: SHA-256 for each immutable transfer payload file
+- `bundle.sha256`: SHA-256 of the canonical payload manifest
+- `depress-resource-gates.sh`: exact resource constants and parsers
+- `depress-mode-manifest.sh`: exact mode parser, restoration, and verification
+- `depress-target-validate.sh`: target validation and early evidence lifecycle
+- `depress-target-cleanup.sh`: exact-marker ownership cleanup
+- `capture-service-evidence.sh`: cursor-bound sanitized service diagnostics
+- `create-operator-result.sh`: allowlisted sanitized result archive generator
+- `verify-bundle.sh`: offline restore, hash, LF, syntax, and payload checks

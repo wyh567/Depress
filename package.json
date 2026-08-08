@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@9.15.4",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build": "turbo run build",
@@ -12,9 +12,11 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "test:e2e:day10": "playwright test --config=playwright.day10.config.ts",
     "format": "prettier --write ."
   },
   "devDependencies": {
+    "@playwright/test": "1.62.0",
     "@types/node": "^24.0.0",
     "eslint": "^9.30.0",
     "prettier": "^3.6.0",

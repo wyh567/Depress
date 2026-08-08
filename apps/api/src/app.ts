@@ -3,15 +3,15 @@ import { createJobStore, type JobStore } from "./services/job-store";
 import { registerCompileRoute } from "./routes/compile";
 import { registerJobsRoute, type ArtifactUrlSigner } from "./routes/jobs";
 import { registerReferencesDoiRoute } from "./routes/references-doi";
-import {
-  createInMemoryCompileQueue,
-  type CompileQueue,
-} from "./queue/compile-queue";
-import {
-  createStoreJobReader,
-  type JobReader,
-} from "./services/job-reader";
+import { createInMemoryCompileQueue, type CompileQueue } from "./queue/compile-queue";
+import { createStoreJobReader, type JobReader } from "./services/job-reader";
 import type { CrossrefClient } from "./services/crossref/crossref-client";
+import type { MentorAuth } from "./auth/auth";
+import { registerAuthRoutes } from "./auth/fastify-auth";
+import type { Pool } from "pg";
+import { registerDocumentRoutes } from "./routes/documents";
+import { registerReferenceRoutes } from "./routes/references";
+import { registerCompileJobRoutes } from "./routes/compile-jobs";
 
 // buildApp never listens on a port — callers (tests via app.inject, a future
 // server entrypoint via app.listen) decide that. Each app gets its own job
@@ -39,9 +39,16 @@ export function buildApp(
     crossref?: CrossrefClient;
     crossrefMailto?: string;
     fetchFn?: typeof fetch;
-  } = {},
+    auth?: MentorAuth;
+    authOrigin?: string;
+    database?: Pool;
+    logLevel?: "fatal" | "error" | "warn" | "info" | "debug";
+  } = {}
 ): FastifyInstance {
-  const app = Fastify();
+  const app = Fastify({
+    logger: options.logLevel ? { level: options.logLevel } : false,
+    routerOptions: { maxParamLength: 1024 },
+  });
   const store = options.store ?? createJobStore();
   const queue = options.queue ?? createInMemoryCompileQueue();
   const jobs = options.jobs ?? createStoreJobReader(store);
@@ -52,6 +59,15 @@ export function buildApp(
     ...(options.crossrefMailto ? { mailto: options.crossrefMailto } : {}),
     ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
   });
+  if (options.auth) {
+    if (!options.authOrigin) throw new Error("authOrigin is required when auth is configured");
+    registerAuthRoutes(app, options.auth, options.authOrigin);
+    if (options.database) {
+      registerDocumentRoutes(app, options.auth, options.database);
+      registerReferenceRoutes(app, options.auth, options.database);
+      registerCompileJobRoutes(app, options.auth, options.database, options.signArtifactUrl);
+    }
+  }
   return app;
 }
 

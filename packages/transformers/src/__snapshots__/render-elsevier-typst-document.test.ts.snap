@@ -18,7 +18,7 @@ exports[`renderElsevierTypstDocument > renders the deterministic immutable manus
 
   Ada Lovelace#super[1], 李华#super[1, 2], Independent Author
 
-  #text(size: 9pt)[#super[1] Compiler Systems Lab
+  #text(size: 9pt)[#super[1] Compiler Systems Lab \\
 #super[2] 计算语言学实验室]
 ]
 

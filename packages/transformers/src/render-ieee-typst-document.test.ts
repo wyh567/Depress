@@ -56,12 +56,18 @@ describe("renderIeeeTypstDocument", () => {
     const out = renderIeeeTypstDocument(smallPaper);
     expect(out).toContain("columns: 2");
     expect(out).toContain('font: "Times New Roman", size: 10pt');
-    expect(out).toContain("margin: (x: 0.62in, top: 0.75in, bottom: 1in)");
+    expect(out).toContain("margin: (x: 0.75in, top: 0.75in, bottom: 1in)");
+    expect(out).toContain('numbering: "1"');
     expect(out).toContain('#set heading(numbering: "I.A.1)")');
+    expect(out).toContain("#text(size: 18pt)[DePress Draft]");
     // No metadata → backward-compatible fallback title.
     expect(out).toContain("DePress Draft");
     // No injection placeholders survive.
     expect(out).not.toContain("{{TITLE}}");
+    expect(out).not.toContain("{{AUTHORS}}");
+    expect(out).not.toContain("{{AFFILIATIONS}}");
+    expect(out).not.toContain("{{ABSTRACT}}");
+    expect(out).not.toContain("{{KEYWORDS}}");
     expect(out).not.toContain("{{BODY}}");
   });
 
@@ -78,24 +84,81 @@ describe("renderIeeeTypstDocument", () => {
     expect(out).toContain("Body");
   });
 
-  it("preserves authors/affiliations/abstract/keywords in AST without rendering them yet", () => {
-    // TODO #1 stores front-matter in AST; full IEEE author block layout is
-    // deferred. Title is the only metadata field injected into Typst now.
+  it("renders ordered authors, affiliations, abstract, and index terms", () => {
     const doc = {
       type: "doc",
       metadata: {
         title: "Real Title",
-        authors: [{ name: "Ada", affiliationIds: ["a1"] }],
-        affiliations: [{ id: "a1", name: "Lab" }],
-        abstract: "An abstract.",
-        keywords: ["AST", "Typst"],
+        authors: [
+          { name: "Ada Lovelace", affiliationIds: ["a1"] },
+          { name: "李华", affiliationIds: ["a1", "a2"] },
+          { name: "Independent Author" },
+        ],
+        affiliations: [
+          { id: "a1", name: "Lab" },
+          { id: "a2", name: "数字出版研究中心" },
+        ],
+        abstract: 'Costs $5, uses "quotes", and Unicode 王伟。',
+        keywords: ["AST", "Typst", "中文"],
       },
       content: [{ type: "paragraph", content: [{ type: "text", text: "Hi" }] }],
     };
     const out = renderIeeeTypstDocument(doc);
     expect(out).toContain("Real Title");
-    expect(out).not.toContain("An abstract.");
-    expect(out).not.toContain("Ada");
+    expect(out.indexOf("Ada Lovelace")).toBeLessThan(out.indexOf("李华"));
+    expect(out).toContain("Ada Lovelace#super[1]");
+    expect(out).toContain("李华#super[1, 2]");
+    expect(out).toContain("#super[1] Lab");
+    expect(out).toContain("#super[2] 数字出版研究中心");
+    expect(out).toContain(
+      "*Abstract*—_Costs \\$5, uses \"quotes\", and Unicode 王伟。_",
+    );
+    expect(out).toContain("*Index Terms*—AST, Typst, 中文");
+    expect(out).toContain(" \\\n");
+    expect(out).not.toContain("a1");
+    expect(out).not.toContain("a2");
+  });
+
+  it("prefers English metadata fields for IEEE front matter", () => {
+    const out = renderIeeeTypstDocument({
+      type: "doc",
+      metadata: {
+        title: "中文标题",
+        titleEn: "English Title",
+        authors: [
+          { name: "王伟", nameEn: "WANG Wei", affiliationIds: ["a1"] },
+        ],
+        affiliations: [
+          { id: "a1", name: "计算机学院", nameEn: "School of CS" },
+        ],
+        abstract: "中文摘要",
+        abstractEn: "English abstract",
+        keywords: ["中文"],
+        keywordsEn: ["AST", "Typst"],
+      },
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Hi" }] }],
+    });
+    expect(out).toContain("English Title");
+    expect(out).not.toContain("中文标题");
+    expect(out).toContain("WANG Wei#super[1]");
+    expect(out).toContain("#super[1] School of CS");
+    expect(out).toContain("*Abstract*—_English abstract_");
+    expect(out).toContain("*Index Terms*—AST, Typst");
+  });
+
+  it("omits abstract and index terms when metadata fields are absent", () => {
+    const out = renderIeeeTypstDocument({
+      type: "doc",
+      metadata: {
+        title: "Title Only",
+        authors: [{ name: "Ada" }],
+      },
+      content: [],
+    });
+    expect(out).toContain("Ada");
+    expect(out).not.toContain("*Abstract*—");
+    expect(out).not.toContain("*Index Terms*—");
+    expect(out).not.toContain("#super[");
   });
 
   it("does not expose any user-controllable style parameters", () => {

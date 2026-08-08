@@ -1,0 +1,38 @@
+[Unit]
+Description=DePress Next.js Web
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=depress-web
+Group=depress-web
+SupplementaryGroups=depress-release
+WorkingDirectory=/opt/depress/current
+EnvironmentFile=/etc/depress/web.env
+Environment=HOME=/var/lib/depress-web
+Environment=TMPDIR=/tmp
+ExecStart=/usr/bin/corepack pnpm --dir /opt/depress/current --filter @depress/web start --hostname 127.0.0.1 --port 3000
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=30s
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+StateDirectory=depress-web
+StateDirectoryMode=0700
+CacheDirectory=depress-web
+CacheDirectoryMode=0700
+ReadOnlyPaths=/opt/depress
+ReadWritePaths=/var/lib/depress-web /var/cache/depress-web
+
+[Install]
+WantedBy=multi-user.target

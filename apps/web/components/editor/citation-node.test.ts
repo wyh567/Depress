@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
-import { Editor } from "@tiptap/core";
-import { parseDoc } from "@depress/ast";
+import { Editor, type JSONContent } from "@tiptap/core";
+import {
+  parseDoc,
+  PersistedDocumentEnvelopeSchema,
+  type PersistedDocumentEnvelope,
+} from "@depress/ast";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDepressExtensions } from "./extensions";
 import { pmDocToAst } from "./pm-doc-to-ast";
@@ -57,6 +61,43 @@ describe("citation 插入 → 序列化 → AST 校验", () => {
     expect(para.content).toHaveLength(5);
     expect(para.content[1]).toEqual({ type: "citation", citeKey: "wang2023" });
     expect(para.content[3]).toEqual({ type: "citation", citeKey: "smith2024" });
+  });
+
+  it("hydrates a persisted A, B, A sequence into the editable PM document unchanged", () => {
+    const envelope: PersistedDocumentEnvelope = {
+      schemaVersion: 1,
+      editor: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "citation", attrs: { citeKey: "A" } },
+              { type: "citation", attrs: { citeKey: "B" } },
+              { type: "citation", attrs: { citeKey: "A" } },
+            ],
+          },
+        ],
+      },
+      metadata: {},
+    };
+
+    editor.commands.setContent(envelope.editor as JSONContent);
+    const reopenedEnvelope = PersistedDocumentEnvelopeSchema.parse({
+      ...envelope,
+      editor: editor.getJSON(),
+    });
+    const paragraph = reopenedEnvelope.editor.content[0];
+    if (paragraph?.type !== "paragraph") throw new Error("expected paragraph");
+    const citationNodes = paragraph.content?.filter((node) => node.type === "citation") ?? [];
+
+    expect(citationNodes).toEqual([
+      { type: "citation", attrs: { citeKey: "A" } },
+      { type: "citation", attrs: { citeKey: "B" } },
+      { type: "citation", attrs: { citeKey: "A" } },
+    ]);
+    expect(citationNodes.map((node) => node.attrs.citeKey)).toEqual(["A", "B", "A"]);
+    expect(editor.isEditable).toBe(true);
   });
 });
 
@@ -161,7 +202,11 @@ describe("引用库联动(TODO #6)", () => {
   it("用库条目 item.id 作为 citeKey 插入,全链路 Zod 通过", async () => {
     const { useReferenceLibrary } = await import("../../stores/reference-library");
     useReferenceLibrary.getState().clear();
-    useReferenceLibrary.getState().upsert({ id: "lib2024", type: "book", title: "库中书" });
+    const persisted = { id: "lib2024", type: "book" as const, title: "Library book" };
+    useReferenceLibrary.setState({
+      items: [persisted],
+      lastConfirmedItems: [persisted],
+    });
 
     const item = useReferenceLibrary.getState().items[0];
     if (!item) throw new Error("expected item");
@@ -176,7 +221,11 @@ describe("引用库联动(TODO #6)", () => {
     const { useReferenceLibrary } = await import("../../stores/reference-library");
     const lib = useReferenceLibrary;
     lib.getState().clear();
-    lib.getState().upsert({ id: "gone2024", type: "book", title: "将被删除" });
+    const persisted = { id: "gone2024", type: "book" as const, title: "Deleted item" };
+    lib.setState({
+      items: [persisted],
+      lastConfirmedItems: [persisted],
+    });
 
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -198,7 +247,7 @@ describe("引用库联动(TODO #6)", () => {
       html: mounted.getHTML(),
     };
 
-    lib.getState().remove("gone2024");
+    lib.setState({ items: [], lastConfirmedItems: [] });
 
     expect(chip?.classList.contains("citation-unknown")).toBe(true);
     expect(JSON.stringify(mounted.getJSON())).toBe(before.pm);
@@ -228,6 +277,7 @@ describe("invalid 视觉态仅存在于视图层", () => {
     const chip = host.querySelector('[data-cite-key="ghost9999"]');
     expect(chip).not.toBeNull();
     expect(chip?.classList.contains("citation-unknown")).toBe(true);
+    expect(chip).toHaveAttribute("aria-label", "Unresolved citation ghost9999");
 
     // 数据层:三种序列化形态均无 invalid/unknown 痕迹
     const pmJson = JSON.stringify(mounted.getJSON());

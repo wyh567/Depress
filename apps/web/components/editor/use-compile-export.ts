@@ -6,6 +6,7 @@ import type { ExportIssue } from "./export-ast";
 import { runCompileExport, type CompileExportDeps } from "./compile-export";
 import { useReferenceLibrary } from "@/stores/reference-library";
 import { useDocumentMetadata } from "@/stores/document-metadata";
+import { clientApiOrigin } from "@/lib/api-origin";
 
 // 状态机:idle → compiling → polling → success | error(校验失败归入
 // error,附 issues)。逻辑全在 runCompileExport(纯函数,已单测);这里
@@ -62,10 +63,9 @@ export function useCompileExport(options: {
       const signal = abortRef.current;
       // Snapshot library + metadata at click time — never mutate stores.
       const library = deps?.library ?? useReferenceLibrary.getState().items;
-      const metadata =
-        deps?.metadata ?? useDocumentMetadata.getState().toMetadataCandidate();
+      const metadata = deps?.metadata ?? useDocumentMetadata.getState().toMetadataCandidate();
       const result = await runCompileExport(getEditorJson(), {
-        apiUrl: process.env["NEXT_PUBLIC_API_URL"] ?? "http://localhost:3001",
+        apiUrl: clientApiOrigin(),
         signal,
         ...deps,
         templateId,

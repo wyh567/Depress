@@ -1,13 +1,15 @@
 import {
+  CompileJobPayloadSchema,
+  CompileRequestSchema,
+  type CompileRequest,
+  type JobFailureCode,
+} from "@depress/ast";
+import {
   renderTypstProject,
   type TypstCompileProject,
 } from "@depress/transformers";
-import { CompileJobPayloadSchema, type JobFailureCode } from "@depress/ast";
 import type { TypstSandboxRunner } from "./typst-sandbox";
 
-// Worker-side result contract. The succeeded outcome carries the S3 object
-// key only — signed URLs are generated on read by GET /jobs/:id, never here.
-// Errors carry only safe, enum-like codes; never raw compiler/S3 output.
 export type CompileJobOutcome =
   | { status: "succeeded"; artifactKey: string; pdfByteLength: number }
   | {
@@ -18,8 +20,6 @@ export type CompileJobOutcome =
       >;
     };
 
-// Storage seam — the S3 service satisfies this; tests inject a fake so no
-// AWS traffic ever occurs in unit tests.
 export interface ArtifactUploader {
   uploadArtifact(key: string, pdf: Buffer): Promise<void>;
 }
@@ -33,9 +33,51 @@ export function artifactKeyForJob(jobId: string): string {
   return `artifacts/${jobId}.pdf`;
 }
 
-// Pure orchestration, injectable sandbox — unit-testable without Docker or
-// Redis. The payload arrives as unknown: the worker never trusts the queue
-// (cross-boundary data re-validated via @depress/ast, cursorrules).
+// Shared execution boundary for both the legacy full-payload worker and the
+// persisted pointer worker. Callers must validate their own transport first.
+export async function executeCompileRequest(
+  jobId: string,
+  request: CompileRequest,
+  deps: CompileProcessorDeps,
+): Promise<CompileJobOutcome> {
+  const parsed = CompileRequestSchema.safeParse(request);
+  if (!parsed.success) {
+    return { status: "failed", error: "INVALID_AST" };
+  }
+
+  let typstProject: TypstCompileProject;
+  try {
+    typstProject = renderTypstProject(parsed.data);
+  } catch {
+    return { status: "failed", error: "INVALID_AST" };
+  }
+
+  // The hardened sandbox owns temporary-directory cleanup in its finally
+  // block. Nothing here derives a path from document content.
+  let pdf: Buffer;
+  try {
+    pdf = await deps.sandbox.compile(typstProject);
+  } catch {
+    return { status: "failed", error: "COMPILE_FAILED" };
+  }
+  if (
+    pdf.byteLength < 5 ||
+    pdf.subarray(0, 5).toString("ascii") !== "%PDF-"
+  ) {
+    return { status: "failed", error: "COMPILE_FAILED" };
+  }
+
+  const artifactKey = artifactKeyForJob(jobId);
+  try {
+    await deps.artifacts.uploadArtifact(artifactKey, pdf);
+  } catch {
+    return { status: "failed", error: "UPLOAD_FAILED" };
+  }
+
+  return { status: "succeeded", artifactKey, pdfByteLength: pdf.byteLength };
+}
+
+// Legacy Phase 3 queue contract remains operational until final cutover.
 export async function processCompileJob(
   payload: unknown,
   deps: CompileProcessorDeps,
@@ -44,37 +86,14 @@ export async function processCompileJob(
   if (!parsed.success) {
     return { status: "failed", error: "INVALID_AST" };
   }
-
-  // The project renderer reuses the shared compile schema, selects cited
-  // references in first-occurrence order, and emits only fixed semantic file
-  // contents. Citations remain citeKey-only until Typst applies IEEE style.
-  let typstProject: TypstCompileProject;
-  try {
-    typstProject = renderTypstProject({
+  return executeCompileRequest(
+    parsed.data.jobId,
+    {
       ast: parsed.data.ast,
       references: parsed.data.references,
       templateId: parsed.data.templateId,
-    });
-  } catch {
-    return { status: "failed", error: "INVALID_AST" };
-  }
-
-  // Sandbox tmp-dir cleanup lives in the sandbox's own finally block
-  // (typst-sandbox.ts) and runs regardless of what happens after compile —
-  // including an upload failure below.
-  let pdf: Buffer;
-  try {
-    pdf = await deps.sandbox.compile(typstProject);
-  } catch {
-    return { status: "failed", error: "COMPILE_FAILED" };
-  }
-
-  const artifactKey = artifactKeyForJob(parsed.data.jobId);
-  try {
-    await deps.artifacts.uploadArtifact(artifactKey, pdf);
-  } catch {
-    return { status: "failed", error: "UPLOAD_FAILED" };
-  }
-
-  return { status: "succeeded", artifactKey, pdfByteLength: pdf.byteLength };
+      format: parsed.data.format,
+    },
+    deps,
+  );
 }

@@ -1,115 +1,211 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import type { CslItem } from "@depress/ast";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { runDoiImport } from "../components/library/run-doi-import";
+import {
+  ReferenceConflictError,
+  ReferenceRequestError,
+  type ReferenceApiClient,
+} from "../lib/reference-client";
 import { useReferenceLibrary } from "./reference-library";
 
-const smith = { id: "smith2024", type: "article-journal", title: "A Study" };
+const smith: CslItem = {
+  id: "smith2024",
+  type: "article-journal",
+  title: "A Study",
+  DOI: "10.1000/smith",
+};
 
-beforeEach(() => {
-  useReferenceLibrary.getState().clear();
-});
+function memoryClient(initial: CslItem[] = []) {
+  let server = [...initial];
+  const client: ReferenceApiClient = {
+    listReferences: vi.fn(async () => structuredClone(server)),
+    createReference: vi.fn(async (item) => {
+      const parsed = item as CslItem;
+      if (server.some((existing) => existing.id === parsed.id)) {
+        throw new ReferenceConflictError();
+      }
+      server = [...server, structuredClone(parsed)];
+      return structuredClone(parsed);
+    }),
+    updateReference: vi.fn(async (identity, item) => {
+      const parsed = item as CslItem;
+      if (!server.some((existing) => existing.id === identity)) {
+        throw new ReferenceRequestError();
+      }
+      server = server.map((existing) => (existing.id === identity ? parsed : existing));
+      return structuredClone(parsed);
+    }),
+    deleteReference: vi.fn(async (identity) => {
+      if (!server.some((existing) => existing.id === identity)) {
+        throw new ReferenceRequestError();
+      }
+      server = server.filter((existing) => existing.id !== identity);
+    }),
+  };
+  return { client, server: () => structuredClone(server) };
+}
 
-describe("reference-library store", () => {
-  it("upsert 添加合法条目,has 可查", () => {
-    useReferenceLibrary.getState().upsert(smith);
-    expect(useReferenceLibrary.getState().items).toHaveLength(1);
-    expect(useReferenceLibrary.getState().has("smith2024")).toBe(true);
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
+describe("persisted reference library", () => {
+  beforeEach(() => {
+    useReferenceLibrary.getState().clear();
   });
 
-  it("upsert 拒绝非法条目(Zod 校验)", () => {
-    expect(() => useReferenceLibrary.getState().upsert({ id: "  ", type: "book" })).toThrow();
-    expect(useReferenceLibrary.getState().items).toHaveLength(0);
-  });
+  it("loads, manually adds, clears, and reloads confirmed references", async () => {
+    const { client } = memoryClient();
+    expect(await useReferenceLibrary.getState().load("user-a", client)).toBe(true);
+    expect(useReferenceLibrary.getState().items).toEqual([]);
 
-  it("重复 id 确定性覆盖(后写入赢),不产生重复项", () => {
-    useReferenceLibrary.getState().upsert(smith);
-    useReferenceLibrary.getState().upsert({ ...smith, title: "Revised Study" });
-    const items = useReferenceLibrary.getState().items;
-    expect(items).toHaveLength(1);
-    expect(items[0]?.title).toBe("Revised Study");
-  });
-
-  it("remove 删除条目", () => {
-    useReferenceLibrary.getState().upsert(smith);
-    useReferenceLibrary.getState().remove("smith2024");
-    expect(useReferenceLibrary.getState().has("smith2024")).toBe(false);
-  });
-
-  it("importBibtex 批量导入并逐条校验", () => {
-    const { imported, errors } = useReferenceLibrary
-      .getState()
-      .importBibtex(
-        `@article{a1, title = {T1}, journal = {J}, year = {2024}}\n@book{b1, title = {T2}, publisher = {P}, year = {2020}}`
-      );
-    expect(errors).toEqual([]);
-    expect(imported).toBe(2);
-    expect(useReferenceLibrary.getState().has("a1")).toBe(true);
-    expect(useReferenceLibrary.getState().has("b1")).toBe(true);
-  });
-
-  it("tryAdd 成功添加且不覆盖已有 id", () => {
-    useReferenceLibrary.getState().upsert(smith);
-    const dup = useReferenceLibrary.getState().tryAdd({
-      ...smith,
-      title: "Should Not Overwrite",
+    expect(await useReferenceLibrary.getState().create(smith, client)).toEqual({
+      outcome: "added",
+      item: smith,
     });
-    expect(dup).toEqual({ outcome: "duplicate_id" });
-    expect(useReferenceLibrary.getState().items[0]?.title).toBe("A Study");
-  });
-
-  it("tryAdd 拒绝同 DOI 的语义重复", () => {
-    useReferenceLibrary.getState().upsert({
-      id: "smith2024",
-      type: "article-journal",
-      title: "A Study",
-      DOI: "10.1000/xyz",
-    });
-    const dup = useReferenceLibrary.getState().tryAdd({
-      id: "10.1000/xyz",
-      type: "article-journal",
-      title: "Other Title",
-      DOI: "10.1000/XYZ",
-    });
-    expect(dup).toEqual({ outcome: "duplicate_doi" });
-    expect(useReferenceLibrary.getState().items).toHaveLength(1);
-  });
-
-  it("tryAdd/hasDoi 对 id 与 DOI 字段做同一 normalizeDoi 规范形", () => {
-    useReferenceLibrary.getState().tryAdd({
-      id: "10.1000/abc",
-      type: "article-journal",
-      title: "Canonical Id",
-    });
-    expect(useReferenceLibrary.getState().hasDoi("doi:10.1000/ABC")).toBe(true);
-    expect(useReferenceLibrary.getState().hasDoi("https://doi.org/10.1000/AbC")).toBe(
-      true,
-    );
+    expect(useReferenceLibrary.getState().lastConfirmedItems).toEqual([smith]);
 
     useReferenceLibrary.getState().clear();
-    useReferenceLibrary.getState().upsert({
-      id: "manual-key",
-      type: "article-journal",
-      title: "Manual",
-      DOI: "10.1000/ABC",
-    });
-    const dup = useReferenceLibrary.getState().tryAdd({
-      id: "10.1000/abc",
-      type: "article-journal",
-      title: "From Crossref",
-      DOI: "10.1000/abc",
-    });
-    expect(dup).toEqual({ outcome: "duplicate_doi" });
-    expect(useReferenceLibrary.getState().items).toHaveLength(1);
-    expect(useReferenceLibrary.getState().items[0]?.title).toBe("Manual");
+    await useReferenceLibrary.getState().load("user-a", client);
+    expect(useReferenceLibrary.getState().items).toEqual([smith]);
   });
 
-  it("hasDoi 按规范化 DOI 检测", () => {
-    useReferenceLibrary.getState().tryAdd({
-      id: "10.1000/xyz",
-      type: "article-journal",
-      title: "T",
-      DOI: "10.1000/xyz",
+  it("updates and deletes only after server confirmation", async () => {
+    const { client } = memoryClient([smith]);
+    await useReferenceLibrary.getState().load("user-a", client);
+    const updated = { ...smith, title: "Revised Study" };
+    expect(await useReferenceLibrary.getState().update(smith.id, updated, client)).toBe(true);
+    expect(useReferenceLibrary.getState().items).toEqual([updated]);
+    expect(await useReferenceLibrary.getState().remove(smith.id, client)).toBe(true);
+    expect(useReferenceLibrary.getState().items).toEqual([]);
+    await useReferenceLibrary.getState().load("user-a", client);
+    expect(useReferenceLibrary.getState().items).toEqual([]);
+  });
+
+  it("shows duplicate conflicts and preserves confirmed state on failure", async () => {
+    const { client } = memoryClient([smith]);
+    await useReferenceLibrary.getState().load("user-a", client);
+    expect(await useReferenceLibrary.getState().create(smith, client)).toEqual({
+      outcome: "duplicate_id",
     });
-    expect(useReferenceLibrary.getState().hasDoi("https://doi.org/10.1000/XYZ")).toBe(
-      true,
+    expect(useReferenceLibrary.getState().error).toContain("citeKey");
+
+    const failing = {
+      ...client,
+      updateReference: vi.fn(async () => {
+        throw new ReferenceRequestError();
+      }),
+    };
+    expect(
+      await useReferenceLibrary
+        .getState()
+        .update(smith.id, { ...smith, title: "Not confirmed" }, failing),
+    ).toBe(false);
+    expect(useReferenceLibrary.getState().items).toEqual([smith]);
+    expect(useReferenceLibrary.getState().lastConfirmedItems).toEqual([smith]);
+  });
+
+  it("persists a mocked DOI lookup result and restores it after reload", async () => {
+    const { client } = memoryClient();
+    await useReferenceLibrary.getState().load("user-a", client);
+    const item = { ...smith, id: "10.1000/smith" };
+    const result = await runDoiImport("10.1000/smith", {
+      apiUrl: "http://api.test",
+      hasId: useReferenceLibrary.getState().has,
+      hasDoi: useReferenceLibrary.getState().hasDoi,
+      tryAdd: (candidate) =>
+        useReferenceLibrary.getState().tryAdd(candidate, client),
+      fetchFn: vi.fn(async () =>
+        new Response(JSON.stringify({ ok: true, item }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    });
+    expect(result).toEqual({ phase: "success", item });
+    useReferenceLibrary.getState().clear();
+    await useReferenceLibrary.getState().load("user-a", client);
+    expect(useReferenceLibrary.getState().items).toEqual([item]);
+  });
+
+  it("persists valid BibTeX entries and restores them after reload", async () => {
+    const { client } = memoryClient();
+    await useReferenceLibrary.getState().load("user-a", client);
+    const result = await useReferenceLibrary.getState().importBibtex(
+      "@article{ada2026, title={Persistent BibTeX}, year={2026}}",
+      client,
     );
+    expect(result).toEqual({ imported: 1, errors: [] });
+    useReferenceLibrary.getState().clear();
+    await useReferenceLibrary.getState().load("user-a", client);
+    expect(useReferenceLibrary.getState().items[0]).toMatchObject({
+      id: "ada2026",
+      title: "Persistent BibTeX",
+    });
+  });
+
+  it("ignores a user A load that resolves after logout and user B login", async () => {
+    const delayedA = deferred<CslItem[]>();
+    const { client: baseA } = memoryClient();
+    const clientA = {
+      ...baseA,
+      listReferences: vi.fn(() => delayedA.promise),
+    };
+    const userBItem = { ...smith, id: "user-b-reference", title: "User B" };
+    const { client: clientB } = memoryClient([userBItem]);
+
+    const loadA = useReferenceLibrary.getState().load("user-a", clientA);
+    useReferenceLibrary.getState().clear();
+    expect(await useReferenceLibrary.getState().load("user-b", clientB)).toBe(true);
+    delayedA.resolve([smith]);
+
+    expect(await loadA).toBe(false);
+    expect(useReferenceLibrary.getState().activeUserId).toBe("user-b");
+    expect(useReferenceLibrary.getState().items).toEqual([userBItem]);
+    expect(useReferenceLibrary.getState().error).toBeNull();
+  });
+
+  it("rejects delayed import persistence when its captured session is stale", async () => {
+    const { client: clientA } = memoryClient();
+    const { client: clientB } = memoryClient();
+    await useReferenceLibrary.getState().load("user-a", clientA);
+    const userAContext = useReferenceLibrary.getState().captureSession();
+    expect(userAContext).toBeDefined();
+    if (!userAContext) throw new Error("Expected a captured user A reference session");
+
+    useReferenceLibrary.getState().clear();
+    await useReferenceLibrary.getState().load("user-b", clientB);
+    expect(
+      await useReferenceLibrary
+        .getState()
+        .tryAdd(smith, clientB, userAContext),
+    ).toEqual({ outcome: "failed" });
+    expect(clientB.createReference).not.toHaveBeenCalled();
+    expect(useReferenceLibrary.getState().items).toEqual([]);
+  });
+
+  it("reports each BibTeX row in a partial import without hiding successes", async () => {
+    const { client } = memoryClient([smith]);
+    await useReferenceLibrary.getState().load("user-a", client);
+    const result = await useReferenceLibrary.getState().importBibtex(
+      [
+        "@article{smith2024, title={Duplicate}}",
+        "@book{ada2026, title={Successful row}}",
+      ].join("\n"),
+      client,
+    );
+
+    expect(result).toEqual({
+      imported: 1,
+      errors: ["Reference smith2024: duplicate citeKey."],
+    });
+    expect(useReferenceLibrary.getState().items.map((item) => item.id)).toEqual([
+      "ada2026",
+      "smith2024",
+    ]);
   });
 });
