@@ -40,6 +40,11 @@ export const SANDBOX_STALE_THRESHOLD_MS =
 
 const ACTIVE_STATES = new Set(["created", "running", "restarting", "paused"]);
 const TERMINAL_STATES = new Set(["exited", "dead"]);
+// Docker's own removal transit state, which routine `--rm` auto-removal drives
+// containers through. The daemon is already deleting these, so reconciliation
+// must neither race it with a second remove nor treat a normal transient as an
+// anomaly that blocks Worker startup.
+const TRANSIENT_STATES = new Set(["removing"]);
 
 const RECONCILER_COMMAND_LIMITS = {
   timeoutMs: 10_000,
@@ -82,7 +87,10 @@ export interface TypstSandboxReconciliationResult {
 
 type RemovalClass = "stale" | "terminal";
 
-type PolicyDecision = { action: "keep" } | { action: "remove"; removalClass: RemovalClass };
+type PolicyDecision =
+  | { action: "keep" }
+  | { action: "skip" }
+  | { action: "remove"; removalClass: RemovalClass };
 
 const defaultSpawnProcess: SpawnProcess = (command, args, options) =>
   spawn(command, args, options) as ChildProcess as ManagedChildProcess;
@@ -100,8 +108,13 @@ export function buildSandboxDiscoveryArgs(): string[] {
   ];
 }
 
+// Container-scoped inspect. The generic `docker inspect` also resolves image,
+// volume, and network IDs, so a removed container can silently fall through to
+// a different object namespace; it also reports a miss through the CLI's own
+// "No such object" text instead of the daemon's "No such container". Scoping to
+// the container namespace keeps lookups on the objects this worker owns.
 export function buildSandboxInspectArgs(containerId: string): string[] {
-  return ["inspect", containerId];
+  return ["container", "inspect", containerId];
 }
 
 export function buildSandboxCleanupArgs(containerId: string): string[] {
@@ -122,6 +135,10 @@ export function classifySandboxContainer(options: {
   nowMs: number;
   staleThresholdMs: number;
 }): PolicyDecision | ReconciliationFailureReason {
+  if (TRANSIENT_STATES.has(options.status)) {
+    return { action: "skip" };
+  }
+
   if (options.createdAtMs > options.nowMs) return "INVALID_CREATED_AT";
 
   if (TERMINAL_STATES.has(options.status)) {
@@ -313,6 +330,12 @@ export async function reconcileStaleTypstSandboxContainers(
     if (typeof decision === "string") fail(decision);
     if (decision.action === "keep") {
       keptCount += 1;
+      continue;
+    }
+    // The daemon is already removing this one; a second rm would race it.
+    // Like the disappearance path above, it counts as scanned but is neither
+    // kept nor removed.
+    if (decision.action === "skip") {
       continue;
     }
 
