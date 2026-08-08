@@ -1,5 +1,5 @@
 import {
-  CompileJobPayloadSchema,
+  CompileQueuePointerSchema,
   EmptyPersistedDocumentEnvelope,
   type CompileJobCreateRequest,
   type CompileQueuePointer,
@@ -29,7 +29,6 @@ import {
   COMPILE_POINTER_QUEUE_NAME,
   type CompilePointerQueue,
 } from "../queue/compile-pointer-queue";
-import { COMPILE_QUEUE_NAME } from "../queue/compile-queue";
 import { publishCompileOutbox } from "../services/compile-outbox-publisher";
 
 const databaseUrl = process.env["DEPRESS_POSTGRES_TEST_URL"];
@@ -614,10 +613,11 @@ describeDatabase("authenticated persisted compile jobs and outbox", () => {
       last_error_code: null,
       status: "queued",
     });
-    expect(COMPILE_POINTER_QUEUE_NAME).not.toBe(COMPILE_QUEUE_NAME);
-    expect(
-      CompileJobPayloadSchema.safeParse(enqueue.mock.calls[0]![0]).success,
-    ).toBe(false);
+    expect(COMPILE_POINTER_QUEUE_NAME).toBe("compile-pointers");
+    expect(CompileQueuePointerSchema.parse(enqueue.mock.calls[0]![0])).toEqual({
+      jobId: created.resource.jobId,
+      snapshotHash: created.resource.snapshotHash,
+    });
   });
 
   it("keeps failures unpublished and retries with the identical job ID and payload", async () => {

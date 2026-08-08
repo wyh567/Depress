@@ -79,14 +79,9 @@ const PointerWorkerEnvSchema = z
   })
   .superRefine(requireProductionRedisUrl);
 
-const LegacyWorkerEnvSchema = z
-  .object(sharedInfrastructureShape)
-  .superRefine(requireProductionRedisUrl);
-
 export type ApiEnv = z.output<typeof ApiEnvSchema>;
 export type OutboxEnv = z.output<typeof OutboxEnvSchema>;
 export type PointerWorkerEnv = z.output<typeof PointerWorkerEnvSchema>;
-export type LegacyWorkerEnv = z.output<typeof LegacyWorkerEnvSchema>;
 export type RedisConnection = {
   host: string;
   port: number;
@@ -123,16 +118,8 @@ export function parsePointerWorkerEnv(source: unknown): PointerWorkerEnv {
   return parse(PointerWorkerEnvSchema, source);
 }
 
-export function parseLegacyWorkerEnv(source: unknown): LegacyWorkerEnv {
-  return parse(LegacyWorkerEnvSchema, source);
-}
-
-// Kept for optional Phase 3 smoke entrypoints until final legacy removal.
-export const parseRuntimeEnv = parseApiEnv;
-export type RuntimeEnv = ApiEnv;
-
 export function redisConnection(
-  env: Pick<LegacyWorkerEnv, "REDIS_URL" | "REDIS_HOST" | "REDIS_PORT">
+  env: Pick<ApiEnv, "REDIS_URL" | "REDIS_HOST" | "REDIS_PORT">
 ): RedisConnection {
   if (env.REDIS_URL) {
     const url = new URL(env.REDIS_URL);

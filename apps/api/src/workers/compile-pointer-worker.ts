@@ -14,7 +14,7 @@ import {
   type TypstSandboxReconciliationResult,
 } from "./typst-sandbox-reconciler";
 import { createTypstSandboxRunner, type TypstSandboxRunner } from "./typst-sandbox";
-import type { ArtifactUploader } from "./compile-processor";
+import type { ArtifactUploader } from "../services/artifact-contracts";
 
 export type CompilePointerWorkerHandle = { close(): Promise<void> };
 

@@ -3,8 +3,6 @@ import { Queue } from "bullmq";
 import { buildApp } from "./app";
 import { parseApiEnv, redisConnection } from "./env";
 import { registerHealthRoutes } from "./health";
-import { createBullmqCompileQueue } from "./queue/compile-queue";
-import { createBullmqJobReader } from "./services/job-reader";
 // Importing services/s3 here (and only here on the API side) triggers its
 // module-init env validation: a server missing S3 config dies at boot, not
 // on the first succeeded-job read.
@@ -24,8 +22,6 @@ async function main(): Promise<void> {
   });
 
   const app = buildApp({
-    queue: createBullmqCompileQueue(connection),
-    jobs: createBullmqJobReader(connection),
     signArtifactUrl: (key) => s3.getSignedDownloadUrl(key),
     ...(env.CROSSREF_MAILTO ? { crossrefMailto: env.CROSSREF_MAILTO } : {}),
     auth,
