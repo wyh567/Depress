@@ -1,7 +1,12 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { SANDBOX_LABELS, type ManagedChildProcess, type SpawnProcess } from "./typst-sandbox";
+import {
+  SANDBOX_LABELS,
+  isDockerContainerAlreadyRemoved,
+  type ManagedChildProcess,
+  type SpawnProcess,
+} from "./typst-sandbox";
 import {
   SANDBOX_LABEL_KEYS,
   SANDBOX_LABEL_VALUES,
@@ -69,6 +74,17 @@ function createdIso(ageMs: number): string {
   return new Date(NOW_MS - ageMs).toISOString();
 }
 
+// Inspect is container-scoped, so argv is ["container", "inspect", <id>].
+// Tests match on that exact shape: a harness that still keyed on args[0]
+// would silently stop recognising inspect calls if the scoping regressed.
+function isInspectCall(args: readonly string[]): boolean {
+  return args[0] === "container" && args[1] === "inspect";
+}
+
+function inspectedId(args: readonly string[]): string {
+  return args[2] ?? "";
+}
+
 // Nonzero short timings for timeout-path tests. Production defaults stay in
 // RECONCILER_COMMAND_LIMITS / CLEANUP_COMMAND_LIMITS; tests must not wait them.
 function fastCommandLimits() {
@@ -129,6 +145,34 @@ describe("sandbox reconciliation policy constants", () => {
     expect(SANDBOX_LIFECYCLE_WINDOW_MS).toBe(38_000);
     expect(SANDBOX_STALE_SAFETY_MARGIN_MS).toBe(60_000);
     expect(SANDBOX_STALE_THRESHOLD_MS).toBe(98_000);
+  });
+});
+
+// Shared with exact-CID cleanup in typst-sandbox.ts, but load-bearing here:
+// reconciliation depends on it to tell a benign disappearance apart from a
+// real inspect failure. Docker names a missing container differently depending
+// on which surface answered, so both wordings must read as absence — while
+// every other failure, including any non-zero exit on its own, fails closed.
+describe("isDockerContainerAlreadyRemoved", () => {
+  it("recognises both Docker wordings for a missing container", () => {
+    expect(
+      isDockerContainerAlreadyRemoved(`Error response from daemon: No such container: ${CID_A}`)
+    ).toBe(true);
+    expect(isDockerContainerAlreadyRemoved(`Error: No such object: ${CID_A}`)).toBe(true);
+    expect(isDockerContainerAlreadyRemoved("ERROR: NO SUCH CONTAINER: x")).toBe(true);
+    expect(isDockerContainerAlreadyRemoved("Error: No Such Object: x")).toBe(true);
+  });
+
+  it("does not treat any other stderr as absence", () => {
+    expect(isDockerContainerAlreadyRemoved("")).toBe(false);
+    expect(isDockerContainerAlreadyRemoved("Error: Cannot connect to the Docker daemon")).toBe(
+      false
+    );
+    expect(isDockerContainerAlreadyRemoved("Got permission denied while trying to connect")).toBe(
+      false
+    );
+    expect(isDockerContainerAlreadyRemoved("Error: container is already in use")).toBe(false);
+    expect(isDockerContainerAlreadyRemoved("no such file or directory")).toBe(false);
   });
 });
 
@@ -202,7 +246,11 @@ describe("classifySandboxContainer", () => {
     ).toEqual({ action: "remove", removalClass: "terminal" });
   });
 
-  it("fails closed for unknown or removing states", () => {
+  // "removing" is Docker's own auto-removal transit state, not an anomaly.
+  // Skipping it leaves deletion to the daemon instead of racing it, and keeps
+  // a routine transient from blocking Worker startup. Age is irrelevant here:
+  // a container already being deleted is never a stale-removal candidate.
+  it("skips containers the daemon is already removing, at any age", () => {
     expect(
       classifySandboxContainer({
         status: "removing",
@@ -210,13 +258,42 @@ describe("classifySandboxContainer", () => {
         nowMs: NOW_MS,
         staleThresholdMs: SANDBOX_STALE_THRESHOLD_MS,
       })
-    ).toBe("UNKNOWN_CONTAINER_STATE");
+    ).toEqual({ action: "skip" });
+    expect(
+      classifySandboxContainer({
+        status: "removing",
+        createdAtMs: NOW_MS - (SANDBOX_STALE_THRESHOLD_MS + 1),
+        nowMs: NOW_MS,
+        staleThresholdMs: SANDBOX_STALE_THRESHOLD_MS,
+      })
+    ).toEqual({ action: "skip" });
   });
 
-  it("fails closed for future Created timestamps", () => {
+  it("still fails closed for genuinely unknown states", () => {
+    for (const status of ["mystery-state", "", "REMOVING", "removing-now"]) {
+      expect(
+        classifySandboxContainer({
+          status,
+          createdAtMs: NOW_MS - 1,
+          nowMs: NOW_MS,
+          staleThresholdMs: SANDBOX_STALE_THRESHOLD_MS,
+        })
+      ).toBe("UNKNOWN_CONTAINER_STATE");
+    }
+  });
+
+  it("fails closed for future Created timestamps in non-removing states", () => {
     expect(
       classifySandboxContainer({
         status: "running",
+        createdAtMs: NOW_MS + 1,
+        nowMs: NOW_MS,
+        staleThresholdMs: SANDBOX_STALE_THRESHOLD_MS,
+      })
+    ).toBe("INVALID_CREATED_AT");
+    expect(
+      classifySandboxContainer({
+        status: "exited",
         createdAtMs: NOW_MS + 1,
         nowMs: NOW_MS,
         staleThresholdMs: SANDBOX_STALE_THRESHOLD_MS,
@@ -263,7 +340,7 @@ describe("reconcileStaleTypstSandboxContainers", () => {
         child.close(0);
         return;
       }
-      if (args[0] === "inspect") {
+      if (isInspectCall(args)) {
         child.stdout.write(inspectJson({ id: CID_A, status: "exited", ageMs: 1 }));
         child.close(0);
         return;
@@ -281,7 +358,7 @@ describe("reconcileStaleTypstSandboxContainers", () => {
       terminalRemovedCount: 1,
       staleRemovedCount: 0,
     });
-    expect(calls.filter((call) => call.args[0] === "inspect")).toHaveLength(1);
+    expect(calls.filter((call) => isInspectCall(call.args))).toHaveLength(1);
     expect(calls.filter((call) => call.args[0] === "rm")).toHaveLength(1);
     expect(calls.find((call) => call.args[0] === "rm")?.args).toEqual(
       buildSandboxCleanupArgs(CID_A)
@@ -298,7 +375,7 @@ describe("reconcileStaleTypstSandboxContainers", () => {
       nowMs: () => NOW_MS,
     }).catch((value: unknown) => value);
     expect(expectSafeError(error).reason).toBe("INVALID_CONTAINER_ID");
-    expect(calls.some((call) => call.args[0] === "inspect")).toBe(false);
+    expect(calls.some((call) => isInspectCall(call.args))).toBe(false);
     expect(calls.some((call) => call.args[0] === "rm")).toBe(false);
   });
 
@@ -313,7 +390,7 @@ describe("reconcileStaleTypstSandboxContainers", () => {
       nowMs: () => NOW_MS,
     }).catch((value: unknown) => value);
     expect(expectSafeError(error).reason).toBe("INVALID_CONTAINER_ID");
-    expect(calls.some((call) => call.args[0] === "inspect")).toBe(false);
+    expect(calls.some((call) => isInspectCall(call.args))).toBe(false);
     expect(calls.some((call) => call.args[0] === "rm")).toBe(false);
   });
 
@@ -461,7 +538,9 @@ describe("reconcileStaleTypstSandboxContainers", () => {
         child.close(0);
         return;
       }
-      child.stdout.write(inspectJson({ id: CID_A, status: "removing", ageMs: 1 }));
+      // A genuinely unrecognised status. "removing" is deliberately not used
+      // here: it is Docker's normal auto-removal transit state and is skipped.
+      child.stdout.write(inspectJson({ id: CID_A, status: "mystery-state", ageMs: 1 }));
       child.close(0);
     });
     const error = await reconcileStaleTypstSandboxContainers({
@@ -504,7 +583,7 @@ describe("reconcileStaleTypstSandboxContainers", () => {
         child.close(0);
         return;
       }
-      if (args[0] === "inspect") {
+      if (isInspectCall(args)) {
         child.stdout.write(
           inspectJson({
             id: CID_A,
@@ -533,15 +612,23 @@ describe("reconcileStaleTypstSandboxContainers", () => {
     expect(calls.filter((call) => call.args[0] === "rm")).toHaveLength(1);
   });
 
-  it("treats inspect not-found as idempotent disappearance without cleanup", async () => {
+  // Both wordings Docker can produce for a container that no longer exists.
+  // "No such container" is the daemon 404 relayed by `docker container
+  // inspect`; "No such object" is what the CLI's generic object lookup emits.
+  // Pinning both keeps the disappearance path from silently regressing into
+  // INSPECT_FAILED if a CLI or daemon release changes the noun.
+  it.each([
+    ["daemon container wording", `Error response from daemon: No such container: ${CID_A}`],
+    ["CLI generic object wording", `Error: No such object: ${CID_A}`],
+  ])("treats inspect not-found (%s) as idempotent disappearance", async (_label, stderrText) => {
     const { spawnProcess, calls } = spawnHarness(async ({ args, child }) => {
       if (args[0] === "ps") {
         child.stdout.write(`${CID_A}\n`);
         child.close(0);
         return;
       }
-      if (args[0] === "inspect") {
-        child.stderr.write("Error: No such container: missing");
+      if (isInspectCall(args)) {
+        child.stderr.write(stderrText);
         child.close(1);
         return;
       }
@@ -562,15 +649,129 @@ describe("reconcileStaleTypstSandboxContainers", () => {
     expect(calls.some((call) => call.args[0] === "rm")).toBe(false);
   });
 
-  it("does not treat non-not-found inspect failures as disappearance", async () => {
+  it("scopes inspect to the container namespace during a real reconcile pass", async () => {
     const { spawnProcess, calls } = spawnHarness(async ({ args, child }) => {
       if (args[0] === "ps") {
         child.stdout.write(`${CID_A}\n`);
         child.close(0);
         return;
       }
-      child.stderr.write("Error: Cannot connect to the Docker daemon");
-      child.close(1);
+      if (isInspectCall(args)) {
+        child.stdout.write(inspectJson({ id: CID_A, status: "running", ageMs: 1 }));
+        child.close(0);
+        return;
+      }
+      child.close(0);
+    });
+    await reconcileStaleTypstSandboxContainers({ spawnProcess, nowMs: () => NOW_MS });
+    const inspectCalls = calls.filter((call) => isInspectCall(call.args));
+    expect(inspectCalls).toHaveLength(1);
+    // Exact argv: a generic ["inspect", id] would also resolve image, volume,
+    // and network IDs, taking cleanup decisions outside the container namespace.
+    expect(inspectCalls[0]?.args).toEqual(["container", "inspect", CID_A]);
+    expect(calls.every((call) => call.args[0] !== "inspect")).toBe(true);
+  });
+
+  it("skips a container the daemon reports as removing, without cleanup", async () => {
+    const { spawnProcess, calls } = spawnHarness(async ({ args, child }) => {
+      if (args[0] === "ps") {
+        child.stdout.write(`${CID_A}\n`);
+        child.close(0);
+        return;
+      }
+      if (isInspectCall(args)) {
+        child.stdout.write(inspectJson({ id: CID_A, status: "removing", ageMs: 1 }));
+        child.close(0);
+        return;
+      }
+      child.close(0);
+    });
+    await expect(
+      reconcileStaleTypstSandboxContainers({
+        spawnProcess,
+        nowMs: () => NOW_MS,
+      })
+    ).resolves.toEqual({
+      scannedCount: 1,
+      keptCount: 0,
+      removedCount: 0,
+      terminalRemovedCount: 0,
+      staleRemovedCount: 0,
+    });
+    expect(calls.some((call) => call.args[0] === "rm")).toBe(false);
+  });
+
+  it("skips a removing container whose valid Created timestamp is in the future", async () => {
+    const { spawnProcess, calls } = spawnHarness(async ({ args, child }) => {
+      if (args[0] === "ps") {
+        child.stdout.write(`${CID_A}\n`);
+        child.close(0);
+        return;
+      }
+      if (isInspectCall(args)) {
+        child.stdout.write(inspectJson({ id: CID_A, status: "removing", ageMs: -1 }));
+        child.close(0);
+        return;
+      }
+      child.close(0);
+    });
+    await expect(
+      reconcileStaleTypstSandboxContainers({
+        spawnProcess,
+        nowMs: () => NOW_MS,
+      })
+    ).resolves.toEqual({
+      scannedCount: 1,
+      keptCount: 0,
+      removedCount: 0,
+      terminalRemovedCount: 0,
+      staleRemovedCount: 0,
+    });
+    expect(calls.some((call) => call.args[0] === "rm")).toBe(false);
+  });
+
+  // The missing-container matcher is substring-based, so it must stay narrow
+  // enough that no other inspect failure is mistaken for absence. Each of these
+  // exits non-zero exactly like a real miss and must still fail closed.
+  it.each([
+    ["daemon unavailable", "Error: Cannot connect to the Docker daemon", "INSPECT_FAILED"],
+    ["permission denied", "Got permission denied while trying to connect", "INSPECT_FAILED"],
+    ["generic failure", "Error: something went wrong", "INSPECT_FAILED"],
+  ])(
+    "does not treat %s as disappearance",
+    async (_label, stderrText, expectedReason) => {
+      const { spawnProcess, calls } = spawnHarness(async ({ args, child }) => {
+        if (args[0] === "ps") {
+          child.stdout.write(`${CID_A}\n`);
+          child.close(0);
+          return;
+        }
+        child.stderr.write(stderrText);
+        child.close(1);
+      });
+      const error = await reconcileStaleTypstSandboxContainers({
+        spawnProcess,
+        nowMs: () => NOW_MS,
+      }).catch((value: unknown) => value);
+      expect(expectSafeError(error).reason).toBe(expectedReason);
+      expect(calls.some((call) => call.args[0] === "rm")).toBe(false);
+    }
+  );
+
+  it("does not treat malformed inspect output as disappearance", async () => {
+    const { spawnProcess, calls } = spawnHarness(async ({ args, child }) => {
+      if (args[0] === "ps") {
+        child.stdout.write(`${CID_A}\n`);
+        child.close(0);
+        return;
+      }
+      if (isInspectCall(args)) {
+        // Exit 0 with unparseable stdout: never absence, never authorization.
+        child.stdout.write("{ not json");
+        child.close(0);
+        return;
+      }
+      child.close(0);
     });
     const error = await reconcileStaleTypstSandboxContainers({
       spawnProcess,
@@ -587,7 +788,7 @@ describe("reconcileStaleTypstSandboxContainers", () => {
         child.close(0);
         return;
       }
-      if (args[0] === "inspect") {
+      if (isInspectCall(args)) {
         child.stdout.write(inspectJson({ id: CID_A, status: "dead", ageMs: 1 }));
         child.close(0);
         return;
@@ -650,7 +851,7 @@ describe("reconcileStaleTypstSandboxContainers", () => {
         child.close(0);
         return;
       }
-      if (args[0] === "inspect") {
+      if (isInspectCall(args)) {
         child.stdout.write(inspectJson({ id: CID_A, status: "exited", ageMs: 1 }));
         child.close(0);
         return;
@@ -704,7 +905,7 @@ describe("reconcileStaleTypstSandboxContainers", () => {
         child.close(0);
         return;
       }
-      if (args[0] === "inspect") {
+      if (isInspectCall(args)) {
         child.stdout.write(inspectJson({ id: CID_A, status: "exited", ageMs: 1 }));
         child.close(0);
         return;
@@ -725,8 +926,8 @@ describe("reconcileStaleTypstSandboxContainers", () => {
         child.close(0);
         return;
       }
-      if (args[0] === "inspect") {
-        const id = args[1] ?? "";
+      if (isInspectCall(args)) {
+        const id = inspectedId(args);
         child.stdout.write(
           inspectJson({
             id,
@@ -756,7 +957,7 @@ describe("reconcileStaleTypstSandboxContainers", () => {
         child.close(0);
         return;
       }
-      if (args[0] === "inspect") {
+      if (isInspectCall(args)) {
         child.stdout.write(inspectJson({ id: CID_A, status: "exited", ageMs: 1 }));
         child.close(0);
         return;
@@ -778,6 +979,6 @@ describe("reconcileStaleTypstSandboxContainers", () => {
   });
 
   it("uses inspect argument builder for validated IDs only", () => {
-    expect(buildSandboxInspectArgs(CID_A)).toEqual(["inspect", CID_A]);
+    expect(buildSandboxInspectArgs(CID_A)).toEqual(["container", "inspect", CID_A]);
   });
 });

@@ -398,8 +398,18 @@ async function readValidatedContainerId(
 
 // Residual P3: Docker CLI "not found" detection is locale-sensitive via
 // English stderr text when no structural exit code is available.
+//
+// The noun depends on which surface answered. A daemon 404 relayed by
+// `docker rm` or `docker container inspect` reads "No such container", while
+// the CLI's own generic object lookup reads "No such object". Both mean the
+// container is already gone. Kept deliberately narrow: permission failures,
+// daemon-connectivity failures, and malformed output must still fail closed,
+// so a non-zero exit alone never counts as absence.
+const DOCKER_MISSING_CONTAINER_MARKERS = ["no such container", "no such object"] as const;
+
 export function isDockerContainerAlreadyRemoved(stderr: string): boolean {
-  return stderr.toLowerCase().includes("no such container");
+  const normalized = stderr.toLowerCase();
+  return DOCKER_MISSING_CONTAINER_MARKERS.some((marker) => normalized.includes(marker));
 }
 
 async function cleanupExactContainer(
