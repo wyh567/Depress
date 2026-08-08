@@ -12,8 +12,8 @@ import {
 import { hashCompileSnapshot } from "../db/compile-job-repository";
 import {
   executeCompileRequest,
-  type CompileProcessorDeps,
-} from "./compile-processor";
+  type CompileExecutorDeps,
+} from "./compile-executor";
 import type { Pool } from "pg";
 
 export const PROCESSING_STALE_AFTER_MS = 30_000;
@@ -25,7 +25,7 @@ export type CompilePointerOutcome =
   | { status: "noop"; reason: "active" | "terminal" | "lost-ownership" }
   | { status: "failed"; error: PersistedCompileJobErrorCode };
 
-export interface CompilePointerProcessorDeps extends CompileProcessorDeps {
+export interface CompilePointerProcessorDeps extends CompileExecutorDeps {
   repository: CompileExecutionRepository;
   createToken?: () => string;
   now?: () => Date;

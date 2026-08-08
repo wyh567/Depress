@@ -76,7 +76,7 @@ git status --porcelain -- apps packages deploy e2e docs process.md architecture.
 | P4-06 文档/引用持久化 | NOT STARTED | ⚠️ 部分 | CRUD + 乐观并发 + owner 隔离有；**checkpoints / soft delete 完全没有** |
 | P4-07 Web 存取 | NOT STARTED | ⚠️ 部分 | save/load/reopen/冲突处理完整；**无 debounce 自动保存** |
 | P4-08 快照 + outbox | NOT STARTED | ✅ 完成 | 不可变 `input_snapshot` + `snapshot_hash` + `compile_outbox` + 幂等 BullMQ job id |
-| P4-09 Worker/Artifact/切换 | NOT STARTED | ⚠️ 差最后一步 | 主链路全通；**旧的未认证 `POST /compile` 仍注册在生产 app 里，cutover gate 未关** |
+| P4-09 Worker/Artifact/切换 | NOT STARTED | ✅ 实现已闭合，文档状态待 T-03 同步 | authenticated snapshot/outbox/pointer-worker/artifact/Web 链路全通；T-02 已移除旧的未认证 compile/jobs 契约 |
 | P4-10 安全/生命周期 | NOT STARTED | ❌ 基本未做 | 无限流 / 无配额 / 无 artifact 过期 / 无清理 |
 | P4-11 CD/部署 | NOT STARTED | ✅ 资产完成，未上线 | systemd×4 + 5 身份 + nginx TLS + release/rollback + 权限自检脚本 |
 | P4-12 公网退出 | NOT STARTED | ❌ 未达成 | 无公开注册、无线上部署证据 |
@@ -106,22 +106,15 @@ git status --porcelain -- apps packages deploy e2e docs process.md architecture.
 
 ## 3. 缺口与风险（按严重度排序）
 
-### 🔴 高危 — 遗留未认证编译入口仍在生产 app 中
+### ✅ 已解决 — 遗留未认证编译入口与死链路
 
-`apps/api/src/app.ts` 无条件调用 `registerCompileRoute`，
-于是生产 API 进程仍暴露 **未认证的 `POST /compile`**（`routes/compile.ts` 全文无鉴权）和 `GET /jobs/:id`。
+T-02 Option A 已完成：Fastify/API 层不再注册 `POST /compile` 或 `GET /jobs/:id`，
+且不存在可重新开启它们的 build/env 开关。直连 API 的两条路径均返回 Fastify 404，
+nginx 的显式拒绝保留为 defense-in-depth。
 
-- 目前只靠 nginx 返回 404 挡住 → **单层边缘防护**，代理配置回退/端口暴露/内网访问都能绕过
-- 生产 systemd 只跑 pointer-worker，**没有 legacy worker 消费这个队列** → 匿名入队的任务在 Redis 无限堆积 → 低成本内存耗尽
-- 违背 `architecture.md` §3.5 "Public anonymous compile is forbidden"
-- 说明 P4-09 的 final cutover gate 事实上没关
-
-连带死代码：`worker-main.ts`、`workers/compile-worker.ts`、`services/job-store.ts`、
-`services/job-reader.ts`、`queue/compile-queue.ts`，以及 web 侧
-`export-pdf-button.tsx`、`compile-export.ts`、`use-compile-export.ts`
-（`editor-area.tsx` 已不再挂载它们）。
-
-→ **任务 `T-02`**
+legacy 全 payload Queue、job store/reader、worker 入口与适配器、五个 Phase 3 smoke，
+以及未挂载的 Web export 死路径已删除。产物签名/上传接口已移至中立契约模块；
+authenticated snapshot/outbox/pointer-worker/Postgres/S3/sandbox 路径保持不变。
 
 ### 🟠 P4-10 生产安全控制基本空白
 
@@ -217,8 +210,6 @@ PDF 永久留在桶里。
 
 | 方法 | 路径 | 鉴权 | 备注 |
 |---|---|---|---|
-| POST | `/compile` | ❌ **无** | 🔴 遗留，待删（`T-02`） |
-| GET | `/jobs/:id` | ❌ **无** | 🔴 遗留，待删（`T-02`） |
 | POST | `/references/doi/lookup` | ❌ 无 | Crossref BFF，可保留但应加限流（`T-04`） |
 | GET/POST | `/api/documents` | ✅ | |
 | GET/PUT | `/api/documents/:documentId` | ✅ | PUT 带乐观并发 |
@@ -235,8 +226,8 @@ PDF 永久留在桶里。
 
 ## 6. 本文件的信息来源与可信度
 
-- 来源：2026-08-04 对本分支的一次**只读**结构化分析
-- **未运行任何测试**。所有"测试通过"陈述引用自 `process.md` 与 `docs/mentor-mvp-acceptance.md` 的历史记录
+- 初始来源：2026-08-04 对当时分支的只读结构化分析；后续任务按变更记录增量校正
+- T-02 结论来自 2026-08-08 实际代码与定向/全量验证：106 passed / 27 skipped，全量 405 passed / 46 skipped，lint/typecheck/build 通过
 - 代码结构、路由清单、迁移内容、依赖方向均为**直接读取源码所得**，可信
 
 ---
@@ -247,3 +238,4 @@ PDF 永久留在桶里。
 |---|---|---|
 | 2026-08-04 | 初次建立（基于只读分析） | 分析会话 |
 | 2026-08-07 | T-01 完成后同步：58 个未提交产品改动已拆分为独立提交、工作树 clean、CI 现覆盖 `feature/**` push。更新 §0 陷阱 2、§1 P4-01 行、§2 双语元数据行、§3 测试债段落。提交链本身仍未 `push`，其余缺口（P4-02~P4-12 其余状态、遗留 `POST /compile`、P4-10 安全空白等）未受影响，原样保留 | T-01 收尾会话 |
+| 2026-08-08 | T-02 Option A：移除 Fastify 层未认证 legacy compile/jobs 路由、legacy Queue/reader/worker/processor 适配层、五个 smoke 与 Web 死路径；必需产物契约移至中立模块，authenticated pointer 链路保留。定向 106 passed / 27 skipped，全量 405 passed / 46 skipped，lint/typecheck/build 通过 | T-02 实施会话 |

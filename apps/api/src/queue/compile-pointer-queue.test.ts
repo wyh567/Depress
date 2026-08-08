@@ -7,7 +7,6 @@ import {
   COMPILE_POINTER_BACKOFF_MS,
   createBullmqCompilePointerQueue,
 } from "./compile-pointer-queue";
-import { COMPILE_QUEUE_NAME } from "./compile-queue";
 
 describe("persisted compile pointer queue", () => {
   it("uses an isolated queue, a strict pointer, and the compile UUID as BullMQ job ID", async () => {
@@ -37,7 +36,7 @@ describe("persisted compile pointer queue", () => {
 
     await queue.enqueue(pointer);
 
-    expect(COMPILE_POINTER_QUEUE_NAME).not.toBe(COMPILE_QUEUE_NAME);
+    expect(COMPILE_POINTER_QUEUE_NAME).toBe("compile-pointers");
     expect(add).toHaveBeenCalledWith(
       COMPILE_POINTER_JOB_NAME,
       pointer,

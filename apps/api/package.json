@@ -16,7 +16,6 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "dev:server": "tsx watch src/server.ts",
-    "dev:worker": "tsx watch src/worker-main.ts",
     "dev:pointer-worker": "tsx watch src/pointer-worker-main.ts"
   },
   "dependencies": {

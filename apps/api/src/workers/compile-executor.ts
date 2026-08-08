@@ -1,5 +1,4 @@
 import {
-  CompileJobPayloadSchema,
   CompileRequestSchema,
   type CompileRequest,
   type JobFailureCode,
@@ -8,6 +7,7 @@ import {
   renderTypstProject,
   type TypstCompileProject,
 } from "@depress/transformers";
+import type { ArtifactUploader } from "../services/artifact-contracts";
 import type { TypstSandboxRunner } from "./typst-sandbox";
 
 export type CompileJobOutcome =
@@ -20,11 +20,7 @@ export type CompileJobOutcome =
       >;
     };
 
-export interface ArtifactUploader {
-  uploadArtifact(key: string, pdf: Buffer): Promise<void>;
-}
-
-export interface CompileProcessorDeps {
+export interface CompileExecutorDeps {
   sandbox: TypstSandboxRunner;
   artifacts: ArtifactUploader;
 }
@@ -33,12 +29,10 @@ export function artifactKeyForJob(jobId: string): string {
   return `artifacts/${jobId}.pdf`;
 }
 
-// Shared execution boundary for both the legacy full-payload worker and the
-// persisted pointer worker. Callers must validate their own transport first.
 export async function executeCompileRequest(
   jobId: string,
   request: CompileRequest,
-  deps: CompileProcessorDeps,
+  deps: CompileExecutorDeps,
 ): Promise<CompileJobOutcome> {
   const parsed = CompileRequestSchema.safeParse(request);
   if (!parsed.success) {
@@ -75,25 +69,4 @@ export async function executeCompileRequest(
   }
 
   return { status: "succeeded", artifactKey, pdfByteLength: pdf.byteLength };
-}
-
-// Legacy Phase 3 queue contract remains operational until final cutover.
-export async function processCompileJob(
-  payload: unknown,
-  deps: CompileProcessorDeps,
-): Promise<CompileJobOutcome> {
-  const parsed = CompileJobPayloadSchema.safeParse(payload);
-  if (!parsed.success) {
-    return { status: "failed", error: "INVALID_AST" };
-  }
-  return executeCompileRequest(
-    parsed.data.jobId,
-    {
-      ast: parsed.data.ast,
-      references: parsed.data.references,
-      templateId: parsed.data.templateId,
-      format: parsed.data.format,
-    },
-    deps,
-  );
 }

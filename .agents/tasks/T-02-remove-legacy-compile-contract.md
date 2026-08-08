@@ -1,6 +1,6 @@
 # T-02 — 移除遗留未认证编译入口与死代码
 
-- **状态**：`NOT_STARTED`
+- **状态**：`DONE`
 - **前置任务**：`T-01`（工作树必须先干净）
 - **预计改动文件数**：15–20（**超过 3 个 → 必须先出计划等用户批准**）
 - **是否需要用户批准才能开工**：**是**，且中途有一个必须问用户的决策点
@@ -136,10 +136,10 @@
 
 ## 完成记录
 
-- 完成日期：
-- 用户选定方案：A / B / C
-- 实际改动文件：
-- 验收实测输出：
+- 完成日期：2026-08-08
+- 用户选定方案：A（完全移除 legacy 未认证契约与死架构）
+- 实际改动文件：`app.ts` / `server.ts` 去 legacy wiring；新增中立 artifact contracts 与 authenticated compile executor；删除 legacy routes/Queue/store/reader/worker/processor adapter、5 个 smoke、legacy-only tests 和未挂载 Web export 路径；更新 pointer-contract 与 404 测试。
+- 验收实测输出：直连 Fastify `POST /compile` / `GET /jobs/:id` 均为 404，未认证 `/api/compile-jobs` 为 401；定向 API 93 passed / 27 skipped，Web 13 passed；全量 405 passed / 46 skipped；lint 5/5、typecheck 5/5、build 通过。相比 475/51 基线，删除 77 个 legacy passing tests + 5 个 skipped smoke，新增 7 个聚焦测试，净变化 -70 passed / -5 skipped。
 
 ## 阻塞记录
 

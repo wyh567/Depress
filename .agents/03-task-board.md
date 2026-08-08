@@ -16,7 +16,7 @@
 |---|---|---|---|---|---|
 | T-01A | 修复 document-metadata 中重复手写的 AST 元数据类型 | [tasks/T-01A-fix-duplicated-metadata-types.md](tasks/T-01A-fix-duplicated-metadata-types.md) | `DONE` | 无（解除 T-01 阻塞） | 2026-08-05 |
 | T-01 | 整理工作树 + 让 CI 覆盖本分支 | [tasks/T-01-worktree-and-ci.md](tasks/T-01-worktree-and-ci.md) | `DONE` | 无 | 2026-08-07 |
-| T-02 | 移除遗留未认证编译入口与死代码 | [tasks/T-02-remove-legacy-compile-contract.md](tasks/T-02-remove-legacy-compile-contract.md) | `NOT_STARTED` | T-01 | 2026-08-04 |
+| T-02 | 移除遗留未认证编译入口与死代码 | [tasks/T-02-remove-legacy-compile-contract.md](tasks/T-02-remove-legacy-compile-contract.md) | `DONE` | T-01 | 2026-08-08 |
 | T-03 | 同步 process.md / architecture.md / ADR 0007 | [tasks/T-03-sync-docs-and-adr.md](tasks/T-03-sync-docs-and-adr.md) | `NOT_STARTED` | T-02 | 2026-08-04 |
 | T-04 | P4-10 最小生产安全集 | [tasks/T-04-min-production-safety.md](tasks/T-04-min-production-safety.md) | `NOT_STARTED` | T-03 | 2026-08-04 |
 | T-05 | 自动保存 + mentor 人工验收收口 | [tasks/T-05-autosave-and-mentor-signoff.md](tasks/T-05-autosave-and-mentor-signoff.md) | `NOT_STARTED` | T-04 | 2026-08-04 |
@@ -59,3 +59,4 @@ T-04 之后才做 T-05，是因为限流/配额属于"开放给更多人用"的�
 | 2026-08-05 | T-01A | `document-metadata.ts` 手写 AST 镜像类型替换为 `@depress/ast` 公开导出的 `DocAuthor`/`DocAffiliation`，解除 T-01 的 typecheck/build 阻塞 |
 | 2026-08-07 | T-01 | 58 个原始未提交产品改动按意图拆分为 6 个独立提交（元数据+IEEE前置信息、沙箱测试固化、部署拓扑加固、operator-validation 生成器、Day10 harness 可移植性）+ 1 个 `.agents` 收尾提交；全套 lint/typecheck/test/build 最终重跑通过，465 passed / 51 skipped；部署与 operator-validation 两个候选在 ECS 完成隔离验证；全部提交仅存在本地，未 push，PR 未改动 |
 | 2026-08-07 | T-01（CI 缺口补齐） | 原验收标准第 7 条（CI `push` 覆盖 `feature/**`）在最终审查阶段单独处理：`push.branches` 新增 `"feature/**"`，`pull_request.branches` 不变；lint/typecheck 通过。T-01 全部原验收标准现在真正闭合 |
+| 2026-08-08 | T-02 | 用户选定 Option A：完全移除未认证 `POST /compile` / `GET /jobs/:id`、legacy 全 payload Queue/reader/worker/processor 适配层、五个 Phase 3 smoke 与未挂载 Web 死路径；保留并验证 authenticated snapshot/outbox/pointer-worker/S3/sandbox 链路。lint/typecheck/build 通过，404 与目标路径定向测试通过，全量 405 passed / 46 skipped |

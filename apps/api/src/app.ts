@@ -1,10 +1,5 @@
 import Fastify, { type FastifyInstance } from "fastify";
-import { createJobStore, type JobStore } from "./services/job-store";
-import { registerCompileRoute } from "./routes/compile";
-import { registerJobsRoute, type ArtifactUrlSigner } from "./routes/jobs";
 import { registerReferencesDoiRoute } from "./routes/references-doi";
-import { createInMemoryCompileQueue, type CompileQueue } from "./queue/compile-queue";
-import { createStoreJobReader, type JobReader } from "./services/job-reader";
 import type { CrossrefClient } from "./services/crossref/crossref-client";
 import type { MentorAuth } from "./auth/auth";
 import { registerAuthRoutes } from "./auth/fastify-auth";
@@ -12,30 +7,19 @@ import type { Pool } from "pg";
 import { registerDocumentRoutes } from "./routes/documents";
 import { registerReferenceRoutes } from "./routes/references";
 import { registerCompileJobRoutes } from "./routes/compile-jobs";
+import type { ArtifactUrlSigner } from "./services/artifact-contracts";
 
 // buildApp never listens on a port — callers (tests via app.inject, a future
-// server entrypoint via app.listen) decide that. Each app gets its own job
-// store instance. The queue is injectable: production passes the BullMQ
-// adapter (createBullmqCompileQueue); tests and Redis-less dev get the
-// in-memory default.
-// signArtifactUrl is injectable like the queue: production passes
+// server entrypoint via app.listen) decide that.
+// signArtifactUrl is injectable: production passes
 // createS3ArtifactService().getSignedDownloadUrl (services/s3 — imported by
 // the server entrypoint so its fail-fast env check runs at boot); tests
 // inject a fake. Without it, succeeded jobs answer 500 ARTIFACT_UNAVAILABLE.
-// jobs is the read side: production injects createBullmqJobReader so GET
-// /jobs/:id reflects real BullMQ state (API and worker share no memory —
-// Redis is the only shared source of truth); without it, reads fall back to
-// the in-memory store, which only ever sees "queued" (dev/test seam).
 // crossref is injectable for DOI lookup tests; production uses the default
 // fixed-origin client (optional CROSSREF_MAILTO via server entrypoint).
 export function buildApp(
   options: {
-    queue?: CompileQueue;
     signArtifactUrl?: ArtifactUrlSigner;
-    jobs?: JobReader;
-    // Test seam: lets integration tests drive job state transitions the way
-    // the worker's outcome would appear through a real reader.
-    store?: JobStore;
     crossref?: CrossrefClient;
     crossrefMailto?: string;
     fetchFn?: typeof fetch;
@@ -49,11 +33,6 @@ export function buildApp(
     logger: options.logLevel ? { level: options.logLevel } : false,
     routerOptions: { maxParamLength: 1024 },
   });
-  const store = options.store ?? createJobStore();
-  const queue = options.queue ?? createInMemoryCompileQueue();
-  const jobs = options.jobs ?? createStoreJobReader(store);
-  registerCompileRoute(app, store, queue);
-  registerJobsRoute(app, jobs, options.signArtifactUrl);
   registerReferencesDoiRoute(app, {
     ...(options.crossref ? { crossref: options.crossref } : {}),
     ...(options.crossrefMailto ? { mailto: options.crossrefMailto } : {}),
@@ -70,7 +49,3 @@ export function buildApp(
   }
   return app;
 }
-
-export * from "./contracts";
-export * from "./queue/compile-queue";
-export * from "./services/job-reader";

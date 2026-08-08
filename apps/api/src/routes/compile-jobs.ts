@@ -9,7 +9,7 @@ import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import type { MentorAuth } from "../auth/auth";
 import { requireAuthenticatedUser } from "../auth/fastify-auth";
-import type { ArtifactUrlSigner } from "./jobs";
+import type { ArtifactUrlSigner } from "../services/artifact-contracts";
 import {
   CompileDocumentNotFoundError,
   CompileProjectionError,
