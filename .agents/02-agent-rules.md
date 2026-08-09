@@ -102,11 +102,6 @@ docker compose ps
 
 | 环境变量 | 需要什么 |
 |---|---|
-| `DEPRESS_ROUNDTRIP_SMOKE=1` | Redis + MinIO + Docker |
-| `DEPRESS_PHASE3_CITATION_SMOKE=1` | 同上 |
-| `DEPRESS_PHASE3_ELSEVIER_SMOKE=1` | 同上 |
-| `DEPRESS_PHASE3_GBT7714_SMOKE=1` | 同上 |
-| `DEPRESS_PHASE3_EXIT_SMOKE=1` | 同上 |
 | `DEPRESS_DOCKER_SMOKE=1` | Docker + 固定 Typst 镜像 |
 | `DEPRESS_CROSSREF_SMOKE=1` | 公网访问 Crossref |
 | `DEPRESS_POSTGRES_TEST_URL=...` | 可写的 Postgres 实例 |
@@ -152,8 +147,8 @@ git diff --stat
 - monorepo 用 turborepo，`pnpm test` 会先 build 依赖包
 - 开发机是 **Windows 11**。`deploy/` 和 `e2e/day10/` 的 shell 脚本需要真实 Linux + systemd + root，
   **在这台机器上跑不了**，只能做静态检查（`bash -n` 语法检查）
-- CI 工作流 `.github/workflows/ci.yml` 目前**只在 master 的 PR/push 上触发**，
-  当前分支 `feature/phase4-mentor-mvp` 推送**不会触发 CI**
+- CI 工作流 `.github/workflows/ci.yml` 在 `master` 与 `feature/**` push、以及目标为 `master` 的 PR 上触发。
+  `fix/**`、`docs/**` 等其他分支的 push 不保证触发 CI；以实际 run 数据为准。
 - Typst 镜像在代码里固定为 **digest**（`apps/api/src/env.ts` 的 `PINNED_TYPST_IMAGE`），
   env 里 `TYPST_IMAGE` 是 `z.literal()`，连 tag 都不接受。改镜像必须同时改代码常量
 - `git diff` 会大量报 `LF will be replaced by CRLF` 警告，**这是正常的**，不是错误

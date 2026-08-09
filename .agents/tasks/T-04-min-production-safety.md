@@ -7,7 +7,8 @@
 
 ## 为什么做这个
 
-从"邀请制演示"走向"任何人可用"的最低门槛。现在的空白（全仓 grep 已核实）：
+即使 Production MVP 保持 invite-only，面向生产网络的编译服务也必须具备最低安全与生命周期控制。
+T-04 不开放公共注册，也不改变账户模型。现在的空白（全仓 grep 已核实）：
 
 - 无限流插件
 - 无 Fastify `bodyLimit` 覆写（用默认 1MB，而 nginx 写的是 `client_max_body_size 10m` —— 两边不一致，实际以 1MB 为准）

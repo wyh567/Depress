@@ -12,9 +12,9 @@ The following invariants apply to both the implemented system and the Phase 4 ta
 4. Templates are code-reviewed assets and are not user-editable in the MVP.
 5. Compilation is always asynchronous and sandboxed.
 
-## 2. Current Implemented Architecture (Phases 1–3)
+## 2. Historical Architecture (Phases 1–3)
 
-This section records repository facts that remain operational while Phase 4 is implemented.
+This section records the architecture that completed Phases 1–3. Its legacy anonymous compile path was retired by T-02 and is not part of the current runtime.
 
 | Layer | Implemented state |
 |---|---|
@@ -22,14 +22,14 @@ This section records repository facts that remain operational while Phase 4 is i
 | Editor | Tiptap/ProseMirror with paragraph, heading levels 1–3, text, semantic bold/italic, and a custom citation node |
 | Client state | Tiptap document plus in-memory Zustand metadata and reference stores |
 | Semantic schema | `@depress/ast` `DocSchema`, CSL schemas, compile schemas, and job response schemas |
-| API | Fastify with `POST /compile`, `GET /jobs/:id`, and DOI lookup |
-| Queue | BullMQ and Redis; current API and Worker exchange the complete raw AST/reference compile payload |
-| Worker | Separate BullMQ Worker process |
+| API | Historically Fastify exposed `POST /compile` and `GET /jobs/:id`; those routes are removed. DOI lookup and authenticated `/api/*` routes remain. |
+| Queue | The historical full-payload BullMQ contract is removed; the current queue carries `{ jobId, snapshotHash }`. |
+| Worker | The historical full-payload Worker is removed; the Pointer Worker is the production worker. |
 | Compiler | Typst 0.15 using immutable IEEE, Elsevier, and GB/T templates |
 | Artifact storage | S3-compatible service; local development uses MinIO |
 | Sandbox | Per-job Docker invocation with no network, read-only root filesystem, dropped capabilities, and CPU/memory/pids/time limits |
 
-The Phase 3 export chain remains supported during migration:
+The retired Phase 3 export chain was:
 
 ```text
 Tiptap JSON
@@ -43,7 +43,7 @@ Tiptap JSON
   -> signed download URL
 ```
 
-Phase 4 migration is additive. P4-03 adds target schemas without deleting the current raw AST contract. P4-08 establishes the authenticated target API through immutable snapshot, initial Compile Job, transactional outbox, and idempotent BullMQ enqueue, but does not cut over the Web or remove the current contract. The current Phase 3 Web/API/Queue/Worker export path must remain usable until P4-09 completes and validates the full Queue-to-Worker-to-Job-to-Artifact replacement path, authorized download, and Web migration. Only after P4-09 acceptance may the old public raw AST compile contract be removed. No intermediate state may leave PDF export unavailable.
+The additive migration completed without an export outage. The current path is the authenticated request, immutable snapshot and hash, transactional outbox, minimal BullMQ pointer, Pointer Worker, Postgres-authoritative Job state, private artifact upload, and owner-authorized download. T-02 then removed the legacy routes and full-payload Queue/Worker/Web path.
 
 ## 3. Phase 4 Accepted Target Architecture
 
@@ -51,7 +51,9 @@ Phase 4 migration is additive. P4-03 adds target schemas without deleting the cu
 
 Phase 4 is divided into Core and Stretch.
 
-Phase 4 Core has one product objective: a user can visit a public URL, sign up or log in, write, save, reload, cite, request an authenticated PDF export, and download only an authorized artifact.
+Phase 4 Core has one product objective: an invited Mentor MVP user can visit the application, log in, write, save, reload, cite, request an authenticated PDF export, and download only an authorized artifact.
+
+Public signup is not part of the Production MVP. Signup, email verification, password recovery, public onboarding, abuse protection, account lifecycle, and public-user compile quotas belong to a later product phase.
 
 Phase 4 Stretch contains DOCX/Pandoc, the full version-history UI, the full multi-project UI, and a complex marketing landing experience. These do not block Phase 4 completion.
 
@@ -119,9 +121,9 @@ Every successful save uses optimistic concurrency and advances the current revis
 
 ### 3.5 Authentication and authorization
 
-The accepted default Auth architecture is Better Auth with Postgres database sessions and a first-party session cookie. Production cookies are HttpOnly, Secure, and SameSite. Browser API traffic uses a same-origin proxy.
+The accepted Auth architecture is Better Auth with Postgres database sessions and a first-party session cookie. Production cookies are HttpOnly, Secure, and SameSite. Browser API traffic uses the same-origin nginx edge.
 
-Every protected Fastify route validates the session and derives ownership from the validated user. Public anonymous compile is forbidden. The exact sign-up method, email-verification policy, transactional email provider, and choice between email/password and OAuth are implementation-spike decisions rather than architecture-frozen vendor choices.
+Every protected Fastify route validates the session and derives ownership from the validated user. Public anonymous compile is forbidden. Production MVP accounts are invite-only and provisioned through the Mentor seed workflow; public signup is deliberately deferred rather than partially implemented.
 
 ### 3.6 Target compile contract and immutable snapshot
 
@@ -167,9 +169,9 @@ P4-09 adds the idempotent Worker and processing-state reconciliation. Worker ret
 
 ### 3.8 Artifact authorization and lifecycle
 
-Artifacts are private objects. Postgres stores their owner relationship, object key, checksum, size, and expiry. The API verifies the validated session and artifact ownership before issuing a short-lived signed URL.
+Artifacts are private objects. Postgres stores their owner relationship, object key, checksum, and size. The API verifies the validated session and artifact ownership before issuing a short-lived signed URL.
 
-Core deletion scope is intentionally small: Documents support soft delete; artifacts have `expires_at`; scheduled cleanup retries failed object deletion; S3 lifecycle is a backstop. A recovery guarantee, recycle-bin UI, and complex deletion workflow are Stretch or later product decisions.
+Artifact expiry, scheduled cleanup, object-delete retry, and an S3 lifecycle backstop are required production controls but are not yet implemented; they are part of T-04. Document soft delete and sparse checkpoints are also unfinished. A recovery guarantee, recycle-bin UI, and complex deletion workflow remain Stretch or later product decisions.
 
 ### 3.9 CI and CD
 
@@ -183,26 +185,29 @@ Production migrations, deployment gates, post-deploy smoke, and rollback belong 
 
 `packages/ast` remains the shared schema source in Phase 4. New schemas should be organized incrementally by internal domains such as `editor`, `document`, `references`, `persistence`, `compile`, `jobs`, and `api`. A future `@depress/contracts` split may be evaluated after Core; package renaming is not a Core task.
 
-## 4. Phase 4 Provisional Deployment Topology
+## 4. Accepted Production MVP Deployment Topology
 
-The provisional target is:
+The accepted Production MVP topology is:
 
 ```text
-Browser
-  -> Vercel-hosted Next.js Web
-  -> same-origin /api proxy
-  -> dedicated Linux VM
-       -> Fastify API without Docker-daemon access
-       -> private Redis/BullMQ
-       -> Worker with Docker-daemon access
-       -> per-job fixed-image Typst Docker sandbox
-  -> managed Postgres
-  -> private S3-compatible object storage
+Internet
+  -> single production Linux VM
+       -> nginx :443 (only public application edge)
+            -> Next.js Web on loopback
+            -> Fastify API on loopback
+       -> PostgreSQL (private)
+       -> Redis/BullMQ (private)
+       -> Outbox Publisher
+       -> Pointer Worker (only runtime identity with Docker access)
+            -> per-job fixed-image Typst Docker sandbox
+  -> independent private S3-compatible artifact storage
 ```
 
-This topology is **Proposed, not Accepted**. P4-02 is a technical spike, not a production deployment. It uses no formal production domain or production user data and does not select DigitalOcean, Fly, Railway, or any other provider as an accepted vendor.
+nginx is the same-origin public boundary; Fastify remains the authentication and authorization boundary. API, Web, database, Redis, and sandbox runtime ports are not public. Artifact storage is external to the VM, private, and accessed through the S3-compatible contract.
 
-The spike must prove Linux host compatibility, Docker isolation flags, resource limits, concurrency, timeouts, restart/retry behavior, cleanup, font mounts, object-storage integration, and the separation between the public API and Docker privileges. Only a successful spike may change ADR 0007 to Accepted. A failed spike changes it to Superseded and triggers a new topology decision.
+This is an accepted Production MVP decision, not a permanent scaling commitment or provider selection. Decomposition should occur only when evidence shows sustained resource contention, a need for independent Worker scaling, stronger database reliability requirements, or unacceptable single-host recovery characteristics. See ADR 0007.
+
+The deployment assets and historical Day 10 staging evidence validate the shape of this topology. Production provisioning, T-04 controls, deployment, and acceptance against current master have not happened.
 
 ## 5. Stretch Roadmap
 

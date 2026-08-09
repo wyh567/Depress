@@ -3,7 +3,7 @@
 ## Context Protocol
 - **START HERE: read `.agents/README.md` and follow its mandated reading order BEFORE any task.**
 - Read `architecture.md` BEFORE any task. It is the architectural source of truth.
-- ⚠️ `process.md`'s **Phase 4 status section is currently stale** (it claims P4-02..P4-12 are NOT STARTED; most are implemented). Use `.agents/01-current-state.md` for status until task `T-03` fixes it. `process.md`'s Phase 1–3 acceptance records remain trustworthy.
+- Use `process.md` for the roadmap and phase status, and use `.agents/01-current-state.md` plus `.agents/03-task-board.md` for the trusted checkpoint and current task. Resolve any conflict through the authority hierarchy in `.agents/README.md`.
 - Work only on the current task in `.agents/03-task-board.md`. Refuse scope creep; record out-of-phase ideas in that file's "发现待办" section instead of implementing.
 - After completing a task, update `.agents/03-task-board.md` and `.agents/01-current-state.md` in the same session.
 

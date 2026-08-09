@@ -6,10 +6,8 @@
 ## 0. 这是什么
 
 `.agents/` 记录 DePress 项目的**真实状态**、**硬性规则**和**已排序的可执行任务**。
-它的存在原因：仓库根目录的 `process.md` 目前**严重滞后于代码实际状态**
-（详见 [`01-current-state.md`](01-current-state.md) §0），直接照 `process.md` 干活会得出错误结论。
-
-在 `process.md` 被修正（任务 `T-03`）之前，**本目录是项目状态的唯一可信来源**。
+`process.md` 的 Phase 4 状态曾严重滞后于代码实际状态。T-03 已同步 roadmap、architecture
+与 ADR 0007；本目录继续作为任务顺序、当前阻塞和操作规则的可信来源。
 
 ## 1. 强制阅读顺序
 
@@ -79,8 +77,8 @@
 
 - `.cursorrules` 仍然有效，**本目录不覆盖它**，只是补充"当前该做什么"。
 - `architecture.md` 是架构真相，仍然有效。
-- `process.md` 的**阶段状态部分当前不可信**（见 `01-current-state.md` §0），
-  但它的 Phase 1–3 历史验收记录是可信的。任务 `T-03` 专门修这个问题。
+- `process.md` 的 Phase 4 状态已由 T-03 同步；Phase 1–3 验收记录仍是历史证据，
+  其中 legacy `/compile` 路径不代表当前生产入口。
 
 ## 6. 本目录的信息来源
 

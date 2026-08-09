@@ -17,7 +17,7 @@
 | T-01A | 修复 document-metadata 中重复手写的 AST 元数据类型 | [tasks/T-01A-fix-duplicated-metadata-types.md](tasks/T-01A-fix-duplicated-metadata-types.md) | `DONE` | 无（解除 T-01 阻塞） | 2026-08-05 |
 | T-01 | 整理工作树 + 让 CI 覆盖本分支 | [tasks/T-01-worktree-and-ci.md](tasks/T-01-worktree-and-ci.md) | `DONE` | 无 | 2026-08-07 |
 | T-02 | 移除遗留未认证编译入口与死代码 | [tasks/T-02-remove-legacy-compile-contract.md](tasks/T-02-remove-legacy-compile-contract.md) | `DONE` | T-01 | 2026-08-08 |
-| T-03 | 同步 process.md / architecture.md / ADR 0007 | [tasks/T-03-sync-docs-and-adr.md](tasks/T-03-sync-docs-and-adr.md) | `NOT_STARTED` | T-02 | 2026-08-04 |
+| T-03 | 同步 process.md / architecture.md / ADR 0007 | [tasks/T-03-sync-docs-and-adr.md](tasks/T-03-sync-docs-and-adr.md) | `IN_PROGRESS` | T-02 | 2026-08-09 |
 | T-04 | P4-10 最小生产安全集 | [tasks/T-04-min-production-safety.md](tasks/T-04-min-production-safety.md) | `NOT_STARTED` | T-03 | 2026-08-04 |
 | T-05 | 自动保存 + mentor 人工验收收口 | [tasks/T-05-autosave-and-mentor-signoff.md](tasks/T-05-autosave-and-mentor-signoff.md) | `NOT_STARTED` | T-04 | 2026-08-04 |
 
@@ -33,8 +33,11 @@
 
 T-02 → T-03 的顺序也有依赖：先删掉遗留契约，`process.md` 里 P4-09 才能诚实地标成完成。
 
-T-04 之后才做 T-05，是因为限流/配额属于"开放给更多人用"的前提，
-而自动保存 + 人工验收是"给人用"的收口动作。
+**当前执行：T-03。** 已批准的治理决策是 single-VM full-stack Production MVP 与
+invite-only Mentor MVP。T-03 完成后，T-04 是下一项工程阻塞；T-05 的顺序与范围不变。
+
+T-04 之后才做 T-05，是因为即使是 invite-only 生产入口也必须先有最小限流/配额/清理控制，
+而自动保存 + 人工验收是“给人用”的收口动作。T-04 不开启公共注册。
 
 ## 3. 发现待办（做任务时发现、但明确不在当前 scope 的问题）
 
