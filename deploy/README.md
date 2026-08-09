@@ -11,8 +11,10 @@ Internet
      /*     -> 127.0.0.1:3000 (Next.js Web)
 ```
 
-PostgreSQL, Redis, S3-compatible storage, and the Docker socket remain private.
-The Worker is the only DePress identity allowed to use Docker.
+PostgreSQL and Redis are VM-local and private. S3-compatible artifact storage
+is external to the VM and private; owner-authorized downloads use short-lived
+signed URLs. The Docker socket remains private, and the Worker is the only
+DePress identity allowed to use Docker.
 
 ## Runtime commands
 
@@ -175,10 +177,11 @@ resource sampling remain responsible for exposing OOM, swap, and pressure.
 
 On a 2 vCPU/4 GiB VM, one idle Next Web process is expected to be a modest
 additional Node resident set, but build-time Next memory is the main peak risk.
-The combined API, Web, Outbox, Worker, PostgreSQL, Redis, and S3 services may
-approach the memory limit during a PDF compile, so keep the 2 GiB swap and
-observe actual RSS before setting limits. The 40 GiB disk is primarily used by
-the OS, one or two releases, package/build artifacts, PostgreSQL/S3 data,
-Docker layers, and journals. Set bounded journald retention and an explicit
-release-retention policy during host operations; this package does not delete
-operator-owned releases automatically.
+The combined API, Web, Outbox, Worker, PostgreSQL, Redis, and Typst sandbox
+workload may approach the memory limit during a PDF compile, so keep the 2 GiB
+swap and observe actual RSS before setting limits. The 40 GiB disk is primarily
+used by the OS, one or two releases, package/build artifacts, PostgreSQL data,
+Docker layers, and journals. External S3-compatible artifact storage and its
+object data are not part of the VM resource budget. Set bounded journald
+retention and an explicit release-retention policy during host operations; this
+package does not delete operator-owned releases automatically.

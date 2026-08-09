@@ -65,8 +65,12 @@ Tiptap 编辑器
   → GET /api/compile-jobs/:id/download → owner 校验 → 短时签名 URL
 ```
 
-**注意**：仓库里还并存一条 Phase 3 遗留链路（未认证 `POST /compile` + 内存 job store + legacy worker）。
-它是待删除的死代码，见 `01-current-state.md` §3 与任务 `T-02`。
+T-02 已移除 Phase 3 的未认证 `POST /compile`、`GET /jobs/:id`、full-payload Queue/Worker
+和未挂载 Web export 死路径。上图的 authenticated snapshot/outbox/pointer-worker 链路是唯一生产编译路径。
+
+Production MVP 采用 single-VM full-stack：nginx、Web、API、PostgreSQL、Redis、Outbox Publisher、
+Pointer Worker 与 Typst Sandbox 在生产 VM；private S3-compatible artifact storage 独立在 VM 外。
+账户模型为 invite-only Mentor MVP。生产尚未部署，T-04 安全/生命周期控制也尚未实现。
 
 ## 5. 包边界与依赖方向（单向，无环 —— 不许制造反向依赖）
 
@@ -104,13 +108,11 @@ depress/
 │   │                   生产走同源 /api/*，next rewrite 仅本地回退
 │   └── api/            Fastify 5
 │       ├── routes/     documents · references · compile-jobs
-│       │               compile(遗留,未认证) · jobs(遗留)
 │       ├── auth/       Better Auth + PG session + seed-mentor
 │       ├── db/         pool · migrate · 5 个迁移 · 4 个 repository
-│       ├── queue/      compile-pointer-queue(新) · compile-queue(遗留)
-│       ├── workers/    compile-pointer-worker(生产) · typst-sandbox + reconciler
-│       │               compile-worker(遗留死代码)
-│       ├── services/   s3 · crossref · job-reader(遗留)
+│       ├── queue/      compile-pointer-queue
+│       ├── workers/    compile-pointer-worker · compile-executor · typst-sandbox + reconciler
+│       ├── services/   s3 · crossref · artifact contracts
 │       └── 入口:       server.ts · outbox-main.ts · pointer-worker-main.ts
 │
 ├── deploy/             单 VM 生产资产：systemd×4 + nginx TLS + release/rollback

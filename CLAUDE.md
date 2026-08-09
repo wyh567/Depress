@@ -10,15 +10,14 @@
 
 ## 2. 三个会让你立刻判断错误的事实
 
-1. **`process.md` 的 Phase 4 状态是错的。** 它写着 P4-02～P4-12 全部 `NOT STARTED`，
-   实际上 P4-03～P4-11 的主体已经实现。**以 [`.agents/01-current-state.md`](.agents/01-current-state.md) 为准。**
+1. **Phase 4 尚未完成。** T-03 已把 `process.md` 与当前实现同步；T-04 生产安全控制、
+   autosave、mentor sign-off、生产部署与 current-master acceptance 仍未完成。
 
-2. **工作树是脏的**（58 个未提交的产品改动）。开工前先自检，
-   计数命令见 [`.agents/01-current-state.md`](.agents/01-current-state.md) §0 陷阱 2。
-   不要把自己的改动和这 58 个混在一起。
+2. **历史 58-file 工作树问题已解决并合并。** 仍必须在每次任务开始时运行 `git status --short`，
+   但不要再把那批历史改动当成当前未提交产品代码。
 
-3. **`POST /compile` 是未认证的遗留路由，仍注册在生产 app 里。** 它是待删的死代码，
-   不是可以参考的样板。新的目标契约是 `POST /api/compile-jobs`。
+3. **Legacy anonymous compile 已删除。** `POST /compile` 和 `GET /jobs/:id` 不再注册；
+   唯一生产编译契约是认证的 `/api/compile-jobs` snapshot/outbox/pointer-worker 链路。
 
 ## 3. 绝对禁止（完整清单见 `.agents/02-agent-rules.md`）
 
@@ -54,5 +53,5 @@ DEPRESS_API_ORIGIN=http://127.0.0.1:3001 pnpm build
 - pnpm 9.15.4 + Node ≥22 + turborepo。不要用 npm / yarn
 - 开发机是 Windows 11。`deploy/` 和 `e2e/day10/` 的 shell 脚本需要真实 Linux + systemd + root，
   **本机跑不了**，只能 `bash -n` 做语法检查
-- CI 目前**只在 master 触发**，功能分支推送不跑 CI
+- CI 在 `master` 与 `feature/**` push、以及面向 `master` 的 pull request 上触发；其他分支 push 不保证触发
 - `git diff` 大量 `LF will be replaced by CRLF` 警告是正常的，不是错误
