@@ -1,20 +1,20 @@
 # 当前真实状态
 
 > **活文档**。任务完成后由 agent 更新对应事实，并在 §7 追加变更记录。
-> 初次快照日期：2026-08-04；最新更新：**2026-08-09（T-03 当前工作）**。
-> 可信 master：`64f8ed459de32aff4409e0332d604f3cfa977886`；PR #3、#4、#5 均已合并，
-> master CI 已通过。当前 T-03 分支只包含尚未提交的治理文档同步。
+> 初次快照日期：2026-08-04；最新更新：**2026-08-09（T-03 合并收尾）**。
+> 可信 master：`d3fc0790794f272786a3eea196f5975c2b96360e`；PR #3、#4、#5、#6 均已合并，
+> T-03 post-merge master CI 已通过。T-03 已完成；T-04 是下一任务，仍为 `NOT_STARTED`。
 
 ---
 
 ## 0. ⚠️ 先读这一节：曾经会让你判断错误的陷阱（部分已解决）
 
-### 陷阱 1（T-03 当前正在解决）：Phase 4 治理文档曾严重滞后
+### 陷阱 1（已解决，2026-08-09）：Phase 4 治理文档曾严重滞后
 
 旧版 `process.md` 把 P4-02～P4-12 全标为 `NOT STARTED`，并且 `architecture.md` / ADR 0007
-仍描述 Vercel + 专用后端 VM。T-03 当前工作树已把它们同步到本文件 §1 的真实状态，并记录
-Accepted single-VM Production MVP 与 invite-only Mentor MVP 决策。T-03 在审查、提交并合并前仍为
-`IN_PROGRESS`；不要据此推断 T-04、部署或生产验收已完成。
+仍描述 Vercel + 专用后端 VM。T-03 已把它们同步到本文件 §1 的真实状态，并记录
+Accepted single-VM Production MVP 与 invite-only Mentor MVP 决策。PR #6 已合并且 post-merge CI
+为 `SUCCESS`；不要据此推断 T-04、部署或生产验收已完成。
 
 ### 陷阱 2（已解决，2026-08-07）：曾经的 58 个未提交产品改动
 
@@ -171,10 +171,11 @@ T-05 仍负责 autosave 与 mentor 人工 sign-off，不负责重新决定当前
 
 → **`T-01` 已完成**；下一个任务见 `03-task-board.md`
 
-### ✅ T-03 当前同步范围
+### ✅ T-03 已完成
 
 `process.md` 的 Phase 4 状态、Mentor MVP 范围和退出标准，`architecture.md` 的部署拓扑与账户模型，
-以及 ADR 0007 的状态/决策已在当前 T-03 工作树中同步。T-03 仍为 `IN_PROGRESS`，等待审查、提交与合并。
+以及 ADR 0007 的状态/决策已同步并经 PR #6 合并到 master。T-03 post-merge CI 为 `SUCCESS`；
+T-04 是下一任务，但仍为 `NOT_STARTED`。
 
 ---
 
@@ -231,3 +232,4 @@ T-05 仍负责 autosave 与 mentor 人工 sign-off，不负责重新决定当前
 | 2026-08-07 | T-01 完成后同步：58 个未提交产品改动已拆分为独立提交、工作树 clean、CI 现覆盖 `feature/**` push。更新 §0 陷阱 2、§1 P4-01 行、§2 双语元数据行、§3 测试债段落。提交链本身仍未 `push`，其余缺口（P4-02~P4-12 其余状态、遗留 `POST /compile`、P4-10 安全空白等）未受影响，原样保留 | T-01 收尾会话 |
 | 2026-08-08 | T-02 Option A：移除 Fastify 层未认证 legacy compile/jobs 路由、legacy Queue/reader/worker/processor 适配层、五个 smoke 与 Web 死路径；必需产物契约移至中立模块，authenticated pointer 链路保留。定向 106 passed / 27 skipped，全量 405 passed / 46 skipped，lint/typecheck/build 通过 | T-02 实施会话 |
 | 2026-08-09 | T-03 当前工作：可信 master 更新为 `64f8ed459...`；记录 PR #3/#4/#5 已合并，接受 single-VM full-stack Production MVP 与 invite-only Mentor MVP；同步 Phase 4 状态，并明确 T-04、autosave、mentor sign-off、生产部署/验收仍未完成 | T-03 实施会话 |
+| 2026-08-09 | T-03 合并收尾：PR #6 已合并，可信 master 更新为 `d3fc0790794f272786a3eea196f5975c2b96360e`，post-merge CI `SUCCESS`；T-03 改为 `DONE`，T-04 为下一任务但仍是 `NOT_STARTED` | T-03 收尾会话 |
