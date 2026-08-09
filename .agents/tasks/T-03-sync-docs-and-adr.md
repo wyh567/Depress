@@ -1,6 +1,6 @@
 # T-03 — 同步 process.md / architecture.md / ADR 0007 到真实状态
 
-- **状态**：`IN_PROGRESS`
+- **状态**：`DONE`
 - **前置任务**：`T-02`
 - **预计改动文件数**：3–4（全是文档）
 - **是否需要用户批准才能开工**：**是**（改的是治理文档，且涉及 ADR 状态变更）
@@ -116,12 +116,14 @@ ADR 的价值在于记录"为什么变"，直接改成 Accepted 会抹掉这次�
 
 ## 完成记录
 
-- 完成日期：待审查、提交与合并（治理同步实现于 2026-08-09）
+- 完成日期：2026-08-09
 - 决策 1 结果：接受 single-VM full-stack Production MVP；ADR 0007 改为 `Accepted`，不新建 0008
 - 决策 2 结果：接受 invite-only Mentor MVP；公共注册及配套能力推迟到后续产品阶段
 - 实际改动文件：`architecture.md`、`process.md`、`docs/adr/0007-production-compile-sandbox-topology.md`、`deploy/README.md`、`CLAUDE.md`、`.cursorrules`、`.agents/README.md`、`.agents/00-project-context.md`、`.agents/01-current-state.md`、`.agents/02-agent-rules.md`、`.agents/03-task-board.md`、`.agents/tasks/T-03-sync-docs-and-adr.md`、`.agents/tasks/T-04-min-production-safety.md`
 - 首次一致性审查：`T03_CONSISTENCY_REVIEW_BLOCKED`；发现两项 MAJOR conflicting-stale——`.cursorrules` 仍称 `process.md` Phase 4 不可信，`deploy/README.md` 仍把 S3 服务与数据计入生产 VM 预算。
-- 修复状态：当前未提交实现已修正上述两处。focused implementation search 预期 `CONFLICTING_STALE = 0`，仍须独立复审确认；不得据此声称 `T03_CONSISTENCY_REVIEW_PASS`。残留 Vercel、legacy route、`8a83cfd` 与旧状态表述仅允许限定在历史记录、已拒绝替代方案或 future backlog。T-04、autosave、mentor sign-off、生产部署/验收保持未完成。任务在审查与提交前维持 `IN_PROGRESS`
+- 修复与复审结果：上述两处已修正，focused independent re-review 为 `T03_CONSISTENCY_REREVIEW_PASS`，`CONFLICTING_STALE = 0`。
+- 合并结果：PR #6 已合并；可信 master 为 `d3fc0790794f272786a3eea196f5975c2b96360e`，post-merge CI 为 `SUCCESS`。
+- 后续状态：T-04 是下一任务但仍为 `NOT_STARTED`；autosave、mentor sign-off、生产部署/验收保持未完成。
 
 ## 阻塞记录
 
