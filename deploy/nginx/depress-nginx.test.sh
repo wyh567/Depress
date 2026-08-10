@@ -20,6 +20,8 @@ grep -Eq '^[[:space:]]*proxy_set_header X-Real-IP \$remote_addr;' "${SNIPPET}"
 grep -Eq '^[[:space:]]*proxy_pass http://depress_api;' "${SNIPPET}"
 grep -Eq '^[[:space:]]*proxy_pass http://depress_web;' "${SNIPPET}"
 grep -Eq '^[[:space:]]*return 301 https://\$host\$request_uri;' "${SNIPPET}"
+test "$(grep -Ec '^[[:space:]]*client_max_body_size 1m;' "${SNIPPET}")" -eq 1
+! grep -Eq '^[[:space:]]*client_max_body_size (10m|[2-9][0-9]*m);' "${SNIPPET}"
 ! grep -Eq 'listen (3000|3001|5432|6379|9000|9001|2375|2376)' "${SNIPPET}"
 
 if command -v nginx >/dev/null 2>&1; then

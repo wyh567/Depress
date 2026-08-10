@@ -13,6 +13,10 @@ import {
   type PersistedCompileJobStatus,
 } from "@depress/ast";
 import type { Pool, PoolClient } from "pg";
+import {
+  DEFAULT_COMPILE_ACTIVE_JOB_LIMIT,
+  DEFAULT_COMPILE_SNAPSHOT_MAX_BYTES,
+} from "../compile-safety";
 
 export class CompileDocumentNotFoundError extends Error {
   constructor() {
@@ -32,6 +36,20 @@ export class CompileProjectionError extends Error {
   constructor() {
     super("COMPILE_PROJECTION_INVALID");
     this.name = "CompileProjectionError";
+  }
+}
+
+export class CompileJobLimitError extends Error {
+  constructor() {
+    super("COMPILE_JOB_LIMIT");
+    this.name = "CompileJobLimitError";
+  }
+}
+
+export class CompileInputTooLargeError extends Error {
+  constructor() {
+    super("COMPILE_INPUT_TOO_LARGE");
+    this.name = "CompileInputTooLargeError";
   }
 }
 
@@ -65,11 +83,13 @@ interface CompileJobRow {
 interface CompileJobArtifactRow {
   status: string;
   artifact_key: string | null;
+  artifact_unavailable: boolean;
 }
 
 export interface CompileJobArtifactState {
   status: PersistedCompileJobStatus;
   artifactKey: string | null;
+  artifactUnavailable: boolean;
 }
 
 export interface CreatedCompileJob {
@@ -80,6 +100,8 @@ export interface CreatedCompileJob {
 export interface CompileJobRepositoryOptions {
   createId?: () => string;
   beforeOutboxInsert?: (client: PoolClient) => void | Promise<void>;
+  activeJobLimit?: number;
+  snapshotMaxBytes?: number;
 }
 
 function canonicalJson(value: unknown): string {
@@ -104,13 +126,19 @@ function canonicalJson(value: unknown): string {
   throw new CompileProjectionError();
 }
 
-export function hashCompileSnapshot(snapshot: unknown): {
+export function hashCompileSnapshot(
+  snapshot: unknown,
+  maxBytes = DEFAULT_COMPILE_SNAPSHOT_MAX_BYTES,
+): {
   snapshot: CompileSnapshot;
   canonical: string;
   hash: string;
 } {
   const parsed = CompileSnapshotSchema.parse(snapshot);
   const canonical = canonicalJson(parsed);
+  if (Buffer.byteLength(canonical, "utf8") > maxBytes) {
+    throw new CompileInputTooLargeError();
+  }
   return {
     snapshot: parsed,
     canonical,
@@ -132,11 +160,42 @@ function toResource(row: CompileJobRow): PersistedCompileJobResource {
   });
 }
 
+const OWNER_SESSION_GATE_SQL =
+  "SELECT pg_advisory_lock(hashtextextended($1, 0))";
+const OWNER_TRANSACTION_LOCK_SQL =
+  "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))";
+const OWNER_SESSION_GATE_UNLOCK_SQL =
+  "SELECT pg_advisory_unlock(hashtextextended($1, 0)) AS unlocked";
+
+type SessionGateState =
+  | "not-attempted"
+  | "acquisition-unconfirmed"
+  | "held"
+  | "release-unconfirmed"
+  | "released";
+
+async function releaseOwnerSessionGate(
+  client: PoolClient,
+  ownerLockKey: string,
+): Promise<void> {
+  const result = await client.query<{ unlocked: boolean }>(
+    OWNER_SESSION_GATE_UNLOCK_SQL,
+    [ownerLockKey],
+  );
+  if (result.rows[0]?.unlocked !== true) {
+    throw new Error("Compile owner session gate release was not confirmed");
+  }
+}
+
 export function createCompileJobRepository(
   pool: Pool,
   options: CompileJobRepositoryOptions = {},
 ) {
   const createId = options.createId ?? randomUUID;
+  const activeJobLimit =
+    options.activeJobLimit ?? DEFAULT_COMPILE_ACTIVE_JOB_LIMIT;
+  const snapshotMaxBytes =
+    options.snapshotMaxBytes ?? DEFAULT_COMPILE_SNAPSHOT_MAX_BYTES;
 
   return {
     async createForOwner(input: {
@@ -145,8 +204,26 @@ export function createCompileJobRepository(
     }): Promise<CreatedCompileJob> {
       const request = CompileJobCreateRequestSchema.parse(input.request);
       const client = await pool.connect();
+      const ownerLockKey = `compile-active-job:${input.ownerUserId}`;
+      let sessionGateState: SessionGateState = "not-attempted";
+      let transactionMayBeOpen = false;
+      let discardClient = false;
       try {
+        sessionGateState = "acquisition-unconfirmed";
+        await client.query(OWNER_SESSION_GATE_SQL, [ownerLockKey]);
+        sessionGateState = "held";
+
+        transactionMayBeOpen = true;
         await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+
+        // This must remain the first query after BEGIN. The pre-transaction
+        // session gate ensures a waiter starts its fixed snapshot only after
+        // the preceding same-owner transaction commits.
+        await client.query(OWNER_TRANSACTION_LOCK_SQL, [ownerLockKey]);
+        sessionGateState = "release-unconfirmed";
+        await releaseOwnerSessionGate(client, ownerLockKey);
+        sessionGateState = "released";
+
         const projectResult = await client.query<ProjectRow>(
           `
             SELECT id
@@ -206,7 +283,20 @@ export function createCompileJobRepository(
           throw new CompileProjectionError();
         }
 
-        const hashed = hashCompileSnapshot(snapshot);
+        const hashed = hashCompileSnapshot(snapshot, snapshotMaxBytes);
+        const activeResult = await client.query<{ count: string }>(
+          `
+            SELECT count(*)::text AS count
+            FROM compile_jobs AS jobs
+            JOIN projects ON projects.id = jobs.project_id
+            WHERE projects.owner_user_id = $1
+              AND jobs.status IN ('accepted', 'queued', 'processing')
+          `,
+          [input.ownerUserId],
+        );
+        if (Number(activeResult.rows[0]!.count) >= activeJobLimit) {
+          throw new CompileJobLimitError();
+        }
         const jobId = createId();
         const outboxId = createId();
         const inserted = await client.query<CompileJobRow>(
@@ -240,15 +330,43 @@ export function createCompileJobRepository(
           [outboxId, jobId, hashed.hash],
         );
         await client.query("COMMIT");
+        transactionMayBeOpen = false;
         return {
           resource: toResource(inserted.rows[0]!),
           snapshot: hashed.snapshot,
         };
       } catch (error) {
-        await client.query("ROLLBACK");
+        if (transactionMayBeOpen) {
+          try {
+            await client.query("ROLLBACK");
+            transactionMayBeOpen = false;
+          } catch {
+            discardClient = true;
+          }
+        }
+
+        if (sessionGateState === "held" && !discardClient) {
+          sessionGateState = "release-unconfirmed";
+          try {
+            await releaseOwnerSessionGate(client, ownerLockKey);
+            sessionGateState = "released";
+          } catch {
+            discardClient = true;
+          }
+        } else if (
+          sessionGateState === "acquisition-unconfirmed" ||
+          sessionGateState === "release-unconfirmed"
+        ) {
+          discardClient = true;
+        }
+
         throw error;
       } finally {
-        client.release();
+        if (discardClient) {
+          client.release(true);
+        } else {
+          client.release();
+        }
       }
     },
 
@@ -278,7 +396,16 @@ export function createCompileJobRepository(
     ): Promise<CompileJobArtifactState | undefined> {
       const result = await pool.query<CompileJobArtifactRow>(
         `
-          SELECT jobs.status, jobs.artifact_key
+          SELECT
+            jobs.status,
+            jobs.artifact_key,
+            CASE
+              WHEN jobs.status = 'succeeded' THEN (
+                jobs.artifact_deleted_at IS NOT NULL OR
+                jobs.expires_at <= now()
+              )
+              ELSE false
+            END AS artifact_unavailable
           FROM compile_jobs AS jobs
           JOIN projects ON projects.id = jobs.project_id
           WHERE jobs.id = $1 AND projects.owner_user_id = $2
@@ -290,6 +417,7 @@ export function createCompileJobRepository(
         ? {
             status: PersistedCompileJobStatusSchema.parse(row.status),
             artifactKey: row.artifact_key,
+            artifactUnavailable: row.artifact_unavailable,
           }
         : undefined;
     },

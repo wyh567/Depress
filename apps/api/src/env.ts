@@ -1,4 +1,17 @@
 import { z } from "zod";
+import {
+  DEFAULT_API_BODY_LIMIT_BYTES,
+  DEFAULT_API_RATE_LIMIT_MAX,
+  DEFAULT_API_RATE_LIMIT_WINDOW_MS,
+  DEFAULT_COMPILE_RATE_LIMIT_MAX,
+  DEFAULT_DOI_RATE_LIMIT_MAX,
+} from "./http-safety";
+import {
+  DEFAULT_COMPILE_ACTIVE_JOB_LIMIT,
+  DEFAULT_COMPILE_SNAPSHOT_MAX_BYTES,
+  MAX_COMPILE_ACTIVE_JOB_LIMIT,
+  MAX_COMPILE_SNAPSHOT_MAX_BYTES,
+} from "./compile-safety";
 
 const emptyToUndefined = (value: unknown) =>
   typeof value === "string" && value.trim() === "" ? undefined : value;
@@ -55,12 +68,70 @@ const ApiEnvSchema = z
     ...sharedInfrastructureShape,
     API_BIND_HOST: z.string().min(1).default("127.0.0.1"),
     API_PORT: z.coerce.number().int().positive().max(65_535).default(3001),
+    API_BODY_LIMIT_BYTES: z.coerce
+      .number()
+      .int()
+      .min(1_024)
+      .max(DEFAULT_API_BODY_LIMIT_BYTES)
+      .default(DEFAULT_API_BODY_LIMIT_BYTES),
+    API_RATE_LIMIT_MAX: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(10_000)
+      .default(DEFAULT_API_RATE_LIMIT_MAX),
+    API_RATE_LIMIT_WINDOW_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(3_600_000)
+      .default(DEFAULT_API_RATE_LIMIT_WINDOW_MS),
+    DOI_RATE_LIMIT_MAX: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(1_000)
+      .default(DEFAULT_DOI_RATE_LIMIT_MAX),
+    COMPILE_RATE_LIMIT_MAX: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(1_000)
+      .default(DEFAULT_COMPILE_RATE_LIMIT_MAX),
+    COMPILE_ACTIVE_JOB_LIMIT: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(MAX_COMPILE_ACTIVE_JOB_LIMIT)
+      .default(DEFAULT_COMPILE_ACTIVE_JOB_LIMIT),
+    COMPILE_SNAPSHOT_MAX_BYTES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(MAX_COMPILE_SNAPSHOT_MAX_BYTES)
+      .default(DEFAULT_COMPILE_SNAPSHOT_MAX_BYTES),
     PUBLIC_ORIGIN: z.string().url(),
     BETTER_AUTH_SECRET: z.string().min(32),
     AUTH_ORIGIN: z.string().url(),
     CROSSREF_MAILTO: z.preprocess(emptyToUndefined, z.string().email().optional()),
   })
-  .superRefine(requireProductionRedisUrl);
+  .superRefine((value, context) => {
+    requireProductionRedisUrl(value, context);
+    if (value.DOI_RATE_LIMIT_MAX > value.API_RATE_LIMIT_MAX) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["DOI_RATE_LIMIT_MAX"],
+        message: "must not exceed API_RATE_LIMIT_MAX",
+      });
+    }
+    if (value.COMPILE_RATE_LIMIT_MAX > value.API_RATE_LIMIT_MAX) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["COMPILE_RATE_LIMIT_MAX"],
+        message: "must not exceed API_RATE_LIMIT_MAX",
+      });
+    }
+  });
 
 const OutboxEnvSchema = z
   .object({

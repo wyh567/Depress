@@ -103,4 +103,53 @@ describe("createS3ArtifactService", () => {
     expect(options.expiresIn).toBe(SIGNED_URL_TTL_SECONDS);
     expect(SIGNED_URL_TTL_SECONDS).toBe(15 * 60);
   });
+
+  it("deletes exactly one validated key from the configured private bucket", async () => {
+    stubEnv(validEnv);
+    const { createS3ArtifactCleanupService } = await importS3();
+    const send = vi.fn<
+      (command: { input: Record<string, unknown> }) => Promise<object>
+    >(async () => ({}));
+    const service = createS3ArtifactCleanupService({
+      client: { send } as never,
+    });
+
+    await service.deleteArtifact("artifacts/j1.pdf");
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0].input).toEqual({
+      Bucket: "depress-artifacts",
+      Key: "artifacts/j1.pdf",
+    });
+  });
+
+  it("does not swallow storage deletion failures", async () => {
+    stubEnv(validEnv);
+    const { createS3ArtifactCleanupService } = await importS3();
+    const failure = new Error("controlled AccessDenied");
+    const service = createS3ArtifactCleanupService({
+      client: {
+        send: vi.fn(async () => {
+          throw failure;
+        }),
+      } as never,
+    });
+
+    await expect(service.deleteArtifact("artifacts/j1.pdf")).rejects.toBe(
+      failure,
+    );
+  });
+
+  it("closes its S3 client resource", async () => {
+    stubEnv(validEnv);
+    const { createS3ArtifactCleanupService } = await importS3();
+    const destroy = vi.fn();
+    const service = createS3ArtifactCleanupService({
+      client: { send: vi.fn(), destroy } as never,
+    });
+
+    service.close();
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
 });

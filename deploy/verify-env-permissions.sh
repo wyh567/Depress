@@ -24,6 +24,8 @@ WORKER_USER=${DEPRESS_WORKER_USER:-depress-worker}
 WORKER_GROUP=${DEPRESS_WORKER_GROUP:-depress-worker}
 MIGRATION_USER=${DEPRESS_MIGRATION_USER:-depress-migration}
 MIGRATION_GROUP=${DEPRESS_MIGRATION_GROUP:-depress-migration}
+CLEANUP_USER=${DEPRESS_CLEANUP_USER:-depress-cleanup}
+CLEANUP_GROUP=${DEPRESS_CLEANUP_GROUP:-depress-cleanup}
 WEB_USER=${DEPRESS_WEB_USER:-depress-web}
 WEB_GROUP=${DEPRESS_WEB_GROUP:-depress-web}
 DOCKER_GROUP=${DEPRESS_DOCKER_GROUP:-docker}
@@ -32,10 +34,11 @@ API_ENV_FILE=${DEPRESS_API_ENV_FILE:-${ENV_DIR}/api.env}
 OUTBOX_ENV_FILE=${DEPRESS_OUTBOX_ENV_FILE:-${ENV_DIR}/outbox.env}
 WORKER_ENV_FILE=${DEPRESS_WORKER_ENV_FILE:-${ENV_DIR}/pointer-worker.env}
 MIGRATION_ENV_FILE=${DEPRESS_MIGRATION_ENV_FILE:-${ENV_DIR}/migration.env}
+CLEANUP_ENV_FILE=${DEPRESS_CLEANUP_ENV_FILE:-${ENV_DIR}/artifact-cleanup.env}
 WEB_ENV_FILE=${DEPRESS_WEB_ENV_FILE:-${ENV_DIR}/web.env}
-readonly runtime_users=("$API_USER" "$OUTBOX_USER" "$WORKER_USER" "$MIGRATION_USER" "$WEB_USER")
-readonly runtime_groups=("$API_GROUP" "$OUTBOX_GROUP" "$WORKER_GROUP" "$MIGRATION_GROUP" "$WEB_GROUP")
-readonly env_files=("$API_ENV_FILE" "$OUTBOX_ENV_FILE" "$WORKER_ENV_FILE" "$MIGRATION_ENV_FILE" "$WEB_ENV_FILE")
+readonly runtime_users=("$API_USER" "$OUTBOX_USER" "$WORKER_USER" "$MIGRATION_USER" "$CLEANUP_USER" "$WEB_USER")
+readonly runtime_groups=("$API_GROUP" "$OUTBOX_GROUP" "$WORKER_GROUP" "$MIGRATION_GROUP" "$CLEANUP_GROUP" "$WEB_GROUP")
+readonly env_files=("$API_ENV_FILE" "$OUTBOX_ENV_FILE" "$WORKER_ENV_FILE" "$MIGRATION_ENV_FILE" "$CLEANUP_ENV_FILE" "$WEB_ENV_FILE")
 
 fail() {
   echo "environment permission check failed: $*" >&2
@@ -85,6 +88,7 @@ assert_directory_boundary() {
     "$OUTBOX_USER" \
     "$WORKER_USER" \
     "$MIGRATION_USER" \
+    "$CLEANUP_USER" \
     "$WEB_USER"; do
     run_as_identity_from_safe_cwd "$user" /usr/bin/test -x "$ENV_DIR" ||
       fail "${user} cannot traverse ${ENV_DIR}"
@@ -127,11 +131,13 @@ assert_identity "$API_USER" "$API_GROUP"
 assert_identity "$OUTBOX_USER" "$OUTBOX_GROUP"
 assert_identity "$WORKER_USER" "$WORKER_GROUP"
 assert_identity "$MIGRATION_USER" "$MIGRATION_GROUP"
+assert_identity "$CLEANUP_USER" "$CLEANUP_GROUP"
 assert_identity "$WEB_USER" "$WEB_GROUP"
 assert_not_member_of_other_private_groups "$API_USER" "$API_GROUP"
 assert_not_member_of_other_private_groups "$OUTBOX_USER" "$OUTBOX_GROUP"
 assert_not_member_of_other_private_groups "$WORKER_USER" "$WORKER_GROUP"
 assert_not_member_of_other_private_groups "$MIGRATION_USER" "$MIGRATION_GROUP"
+assert_not_member_of_other_private_groups "$CLEANUP_USER" "$CLEANUP_GROUP"
 assert_not_member_of_other_private_groups "$WEB_USER" "$WEB_GROUP"
 getent group "$DOCKER_GROUP" >/dev/null 2>&1 ||
   fail "missing Docker group ${DOCKER_GROUP}"
@@ -143,18 +149,21 @@ assert_metadata "$API_ENV_FILE" "root:${API_GROUP}:640"
 assert_metadata "$OUTBOX_ENV_FILE" "root:${OUTBOX_GROUP}:640"
 assert_metadata "$WORKER_ENV_FILE" "root:${WORKER_GROUP}:640"
 assert_metadata "$MIGRATION_ENV_FILE" "root:${MIGRATION_GROUP}:640"
+assert_metadata "$CLEANUP_ENV_FILE" "root:${CLEANUP_GROUP}:640"
 assert_metadata "$WEB_ENV_FILE" "root:${WEB_GROUP}:640"
 
 test -r "$API_ENV_FILE"
 test -r "$OUTBOX_ENV_FILE"
 test -r "$WORKER_ENV_FILE"
 test -r "$MIGRATION_ENV_FILE"
+test -r "$CLEANUP_ENV_FILE"
 test -r "$WEB_ENV_FILE"
 
 assert_readable "$API_USER" "$API_ENV_FILE"
 assert_readable "$OUTBOX_USER" "$OUTBOX_ENV_FILE"
 assert_readable "$WORKER_USER" "$WORKER_ENV_FILE"
 assert_readable "$MIGRATION_USER" "$MIGRATION_ENV_FILE"
+assert_readable "$CLEANUP_USER" "$CLEANUP_ENV_FILE"
 assert_readable "$WEB_USER" "$WEB_ENV_FILE"
 
 for user in "${runtime_users[@]}"; do
@@ -164,6 +173,7 @@ for user in "${runtime_users[@]}"; do
       "${OUTBOX_USER}:${OUTBOX_ENV_FILE}" | \
       "${WORKER_USER}:${WORKER_ENV_FILE}" | \
       "${MIGRATION_USER}:${MIGRATION_ENV_FILE}" | \
+      "${CLEANUP_USER}:${CLEANUP_ENV_FILE}" | \
       "${WEB_USER}:${WEB_ENV_FILE}")
         ;;
       *)
@@ -182,6 +192,9 @@ fi
 if id -nG "$MIGRATION_USER" | tr ' ' '\n' | grep -Fxq "$DOCKER_GROUP"; then
   fail "${MIGRATION_USER} must not belong to ${DOCKER_GROUP}"
 fi
+if id -nG "$CLEANUP_USER" | tr ' ' '\n' | grep -Fxq "$DOCKER_GROUP"; then
+  fail "${CLEANUP_USER} must not belong to ${DOCKER_GROUP}"
+fi
 if id -nG "$WEB_USER" | tr ' ' '\n' | grep -Fxq "$DOCKER_GROUP"; then
   fail "${WEB_USER} must not belong to ${DOCKER_GROUP}"
 fi
@@ -194,10 +207,12 @@ echo "api_cross_read=DENIED"
 echo "outbox_cross_read=DENIED"
 echo "worker_cross_read=DENIED"
 echo "migration_cross_read=DENIED"
+echo "cleanup_cross_read=DENIED"
 echo "web_cross_read=DENIED"
 echo "worker_docker=ALLOWED"
 echo "api_docker=DENIED"
 echo "outbox_docker=DENIED"
 echo "migration_docker=DENIED"
+echo "cleanup_docker=DENIED"
 echo "web_docker=DENIED"
 echo "release_group_membership=PASS"

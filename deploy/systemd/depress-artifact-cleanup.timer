@@ -1,0 +1,10 @@
+[Unit]
+Description=Run DePress artifact cleanup hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+Unit=depress-artifact-cleanup.service
+
+[Install]
+WantedBy=timers.target

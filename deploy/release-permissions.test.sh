@@ -15,8 +15,8 @@ readonly sandbox="$(mktemp -d /tmp/depress-release-permissions.XXXXXX)"
 readonly operator_cwd="$(mktemp -d /root/depress-operator-cwd.XXXXXX)"
 readonly suffix="${BASHPID}"
 readonly release_group="dpr${suffix}"
-readonly -a users=("dpw${suffix}" "dpa${suffix}" "dpo${suffix}" "dpj${suffix}" "dpm${suffix}")
-readonly -a groups=("dgw${suffix}" "dga${suffix}" "dgo${suffix}" "dgj${suffix}" "dgm${suffix}")
+readonly -a users=("dpw${suffix}" "dpa${suffix}" "dpo${suffix}" "dpj${suffix}" "dpm${suffix}" "dpc${suffix}")
+readonly -a groups=("dgw${suffix}" "dga${suffix}" "dgo${suffix}" "dgj${suffix}" "dgm${suffix}" "dgc${suffix}")
 readonly root="${sandbox}/opt/depress"
 readonly release="${root}/releases/test-release"
 created_users=()
@@ -54,6 +54,7 @@ run_helper() {
     DEPRESS_OUTBOX_USER="${users[2]}" DEPRESS_OUTBOX_GROUP="${groups[2]}" \
     DEPRESS_WORKER_USER="${users[3]}" DEPRESS_WORKER_GROUP="${groups[3]}" \
     DEPRESS_MIGRATION_USER="${users[4]}" DEPRESS_MIGRATION_GROUP="${groups[4]}" \
+    DEPRESS_CLEANUP_USER="${users[5]}" DEPRESS_CLEANUP_GROUP="${groups[5]}" \
     DEPRESS_IDENTITY_EXEC_BIN="${DEPRESS_IDENTITY_EXEC_BIN:-$identity_runner}" \
     bash "$helper" "$@"
 }
@@ -162,7 +163,7 @@ for index in "${!users[@]}"; do
   ! run_as_identity_from_safe_cwd "${users[$index]}" /usr/bin/ln \
     -s "$release" "$root/current" 2>/dev/null
 done
-echo "PASS: root:release-group modes allow five-identity reads and deny writes"
+echo "PASS: root:release-group modes allow six-identity reads and deny writes"
 
 gpasswd -d "${users[0]}" "$release_group" >/dev/null
 expect_verify_rejection missing-release-group

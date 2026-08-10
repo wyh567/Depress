@@ -24,11 +24,47 @@ describe("runtime environment contracts", () => {
     expect(env).toMatchObject({
       API_BIND_HOST: "127.0.0.1",
       API_PORT: 3001,
+      API_BODY_LIMIT_BYTES: 1_048_576,
+      API_RATE_LIMIT_MAX: 120,
+      API_RATE_LIMIT_WINDOW_MS: 60_000,
+      DOI_RATE_LIMIT_MAX: 10,
+      COMPILE_RATE_LIMIT_MAX: 5,
+      COMPILE_ACTIVE_JOB_LIMIT: 2,
+      COMPILE_SNAPSHOT_MAX_BYTES: 2_097_152,
       PUBLIC_ORIGIN: "http://localhost:3000",
       AUTH_ORIGIN: "http://localhost:3000",
       REDIS_HOST: "localhost",
       REDIS_PORT: 6379,
     });
+  });
+
+  it("rejects invalid or unsafe API safety limits", () => {
+    const base = {
+      DATABASE_URL: "postgresql://localhost/depress",
+      BETTER_AUTH_SECRET: "x".repeat(32),
+    };
+    const invalid = [
+      ["API_BODY_LIMIT_BYTES", 0],
+      ["API_BODY_LIMIT_BYTES", 1_048_577],
+      ["API_RATE_LIMIT_MAX", -1],
+      ["API_RATE_LIMIT_MAX", 1.5],
+      ["API_RATE_LIMIT_WINDOW_MS", 0],
+      ["API_RATE_LIMIT_WINDOW_MS", 3_600_001],
+      ["DOI_RATE_LIMIT_MAX", "not-a-number"],
+      ["COMPILE_RATE_LIMIT_MAX", 0],
+      ["COMPILE_ACTIVE_JOB_LIMIT", 0],
+      ["COMPILE_ACTIVE_JOB_LIMIT", -1],
+      ["COMPILE_ACTIVE_JOB_LIMIT", 1.5],
+      ["COMPILE_ACTIVE_JOB_LIMIT", 101],
+      ["COMPILE_SNAPSHOT_MAX_BYTES", 0],
+      ["COMPILE_SNAPSHOT_MAX_BYTES", -1],
+      ["COMPILE_SNAPSHOT_MAX_BYTES", 1.5],
+      ["COMPILE_SNAPSHOT_MAX_BYTES", 16_777_217],
+    ] as const;
+
+    for (const [name, value] of invalid) {
+      expect(() => parseApiEnv({ ...base, [name]: value })).toThrow(name);
+    }
   });
 
   it("fails fast when production origins are missing", () => {

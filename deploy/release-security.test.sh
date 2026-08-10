@@ -12,8 +12,8 @@ SANDBOX=$(mktemp -d)
 chmod 0711 "$SANDBOX"
 readonly SUFFIX="${BASHPID}"
 readonly RELEASE_GROUP="dprs${SUFFIX}"
-readonly -a TEST_USERS=("drw${SUFFIX}" "dra${SUFFIX}" "dro${SUFFIX}" "drj${SUFFIX}" "drm${SUFFIX}")
-readonly -a TEST_GROUPS=("dgrw${SUFFIX}" "dgra${SUFFIX}" "dgro${SUFFIX}" "dgrj${SUFFIX}" "dgrm${SUFFIX}")
+readonly -a TEST_USERS=("drw${SUFFIX}" "dra${SUFFIX}" "dro${SUFFIX}" "drj${SUFFIX}" "drm${SUFFIX}" "drc${SUFFIX}")
+readonly -a TEST_GROUPS=("dgrw${SUFFIX}" "dgra${SUFFIX}" "dgro${SUFFIX}" "dgrj${SUFFIX}" "dgrm${SUFFIX}" "dgrc${SUFFIX}")
 created_users=()
 created_groups=()
 
@@ -103,6 +103,7 @@ run_release() {
     DEPRESS_OUTBOX_USER="${TEST_USERS[2]}" DEPRESS_OUTBOX_GROUP="${TEST_GROUPS[2]}" \
     DEPRESS_WORKER_USER="${TEST_USERS[3]}" DEPRESS_WORKER_GROUP="${TEST_GROUPS[3]}" \
     DEPRESS_MIGRATION_USER="${TEST_USERS[4]}" DEPRESS_MIGRATION_GROUP="${TEST_GROUPS[4]}" \
+    DEPRESS_CLEANUP_USER="${TEST_USERS[5]}" DEPRESS_CLEANUP_GROUP="${TEST_GROUPS[5]}" \
     SYSTEMCTL_BIN="${CASE_SYSTEMCTL}" \
     COREPACK_BIN="${FAKE_COREPACK}" \
     COREPACK_LOG="$COREPACK_LOG" \

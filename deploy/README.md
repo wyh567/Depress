@@ -1,8 +1,9 @@
 # DePress single-VM production deployment
 
 This package targets one Ubuntu Linux VM running the Next.js Web, Fastify API,
-Outbox, Pointer Worker, and explicit Migration entrypoint. nginx is the only
-public application boundary:
+Outbox, Pointer Worker, explicit Migration entrypoint, and a timer-triggered
+one-shot Artifact Cleanup process. nginx is the only public application
+boundary:
 
 ```text
 Internet
@@ -26,6 +27,7 @@ DePress identity allowed to use Docker.
 | Outbox | `corepack pnpm --dir /opt/depress/current --filter @depress/api start:outbox` | `depress-outbox` | `/etc/depress/outbox.env` |
 | Pointer Worker | `corepack pnpm --dir /opt/depress/current --filter @depress/api start:pointer-worker` | `depress-worker` | `/etc/depress/pointer-worker.env` |
 | Migration | `corepack pnpm --dir /opt/depress/current --filter @depress/api db:migrate` | `depress-migration` | `/etc/depress/migration.env` |
+| Artifact Cleanup | `corepack pnpm --dir /opt/depress/current --filter @depress/api artifacts:cleanup` | `depress-cleanup` | `/etc/depress/artifact-cleanup.env` |
 
 The public browser path is same-origin. Web clients use relative `/api/*`
 URLs. The nginx API location is the sole public `/api/*` proxy. The existing
@@ -34,7 +36,7 @@ request and points at `DEPRESS_API_ORIGIN`; it cannot loop through nginx.
 
 ## Identities and environment files
 
-Create five independent system identities with private primary groups:
+Create six independent system identities with private primary groups:
 
 ```bash
 sudo groupadd --system depress-release
@@ -43,15 +45,17 @@ sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin de
 sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin depress-outbox
 sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin depress-worker
 sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin depress-migration
+sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin depress-cleanup
 sudo usermod -aG depress-release depress-web
 sudo usermod -aG depress-release depress-api
 sudo usermod -aG depress-release depress-outbox
 sudo usermod -aG depress-release depress-worker
 sudo usermod -aG depress-release depress-migration
+sudo usermod -aG depress-release depress-cleanup
 sudo usermod -aG docker depress-worker
 ```
 
-All five identities retain their private primary groups and receive only the
+All six identities retain their private primary groups and receive only the
 supplemental `depress-release` group for immutable program reads. That group
 must never own an environment file or Secret. Only the Worker may additionally
 belong to `docker`. The Web identity has no database,
@@ -63,8 +67,12 @@ sudo test ! -L /etc/depress
 sudo install -d -o root -g root -m 0711 /etc/depress
 ```
 
-Use `deploy/env.production.example` to create the five root-owned files. Each
-file is `root:<matching-private-group>` with mode `0640`; `web.env` contains
+Use `deploy/env.production.example` to create the six root-owned files. Each
+file is `root:<matching-private-group>` with mode `0640`. The cleanup file is
+`root:depress-cleanup` mode `0640` and contains only its least-privilege
+`DATABASE_URL` plus its cleanup-only S3 endpoint, region, bucket, access key,
+and secret key. A custom `S3_ENDPOINT` enables the application's existing
+path-style behavior; its URL scheme selects HTTP or TLS. `web.env` contains
 only:
 
 ```text
@@ -93,8 +101,10 @@ cannot mutate or inherit a hard-linked global store. Before activation,
 `release-permissions.sh` rejects dangling, looping, escaping, or hard-linked
 runtime files, then enforces `root:depress-release`: `0750` on parents and
 directories, `0640` on ordinary files, and `0750` only on files that were
-already executable. All five identities must read and traverse the Release and
-must be unable to write it. Only then is `.depress-release` finalized and
+already executable. All six identities must read and traverse the Release and
+must be unable to write it. This includes `depress-cleanup`, which can execute
+the cleanup package from the Release but cannot modify it. Only then is
+`.depress-release` finalized and
 `current`/`previous` switched atomically.
 
 The service restart order is API, Outbox, Worker, Web. The API is restarted
@@ -163,8 +173,19 @@ read-only and reports the OS, systemd, CPU, RAM, swap, disk, required command
 versions, and listener state. The units use directives supported by systemd 249: `StateDirectory`,
 `CacheDirectory`, `RuntimeDirectory`, `ProtectSystem`, `ProtectHome`,
 `ReadOnlyPaths`, and `ReadWritePaths`. Node 22, Corepack/pnpm 9, nginx,
-Docker Engine, PostgreSQL, Redis, `runuser`, GNU `tar`, `readlink`, `stat`,
-`ss`, and `systemd-analyze` are host prerequisites; no installer is included.
+Docker Engine, PostgreSQL **server 15 or newer**, Redis, `runuser`, GNU `tar`,
+`readlink`, `stat`, `ss`, and `systemd-analyze` are host prerequisites; no
+installer is included.
+
+`host-preflight.sh` gates the host on Ubuntu 22.04, but **Ubuntu 22.04
+compatibility does not imply that its default PostgreSQL package is an
+acceptable production version**. Ubuntu 22.04 ships PostgreSQL 14, and
+PostgreSQL 14 and older grant `CREATE` on schema `public` to `PUBLIC` by
+default — which would let `depress_cleanup` create objects regardless of its
+own least-privilege grants. The version that matters is the one reported by the
+**actual connected database server**, not the host OS, the `psql` client, or a
+container image tag. PostgreSQL 16 is the version the cleanup permission model
+is currently validated against.
 
 The resource gates use exact kernel values: at least 2 CPUs from `nproc`,
 `MemTotal >= 3407872 kB` from `/proc/meminfo`, at least 1610612736 bytes of
@@ -185,3 +206,93 @@ Docker layers, and journals. External S3-compatible artifact storage and its
 object data are not part of the VM resource budget. Set bounded journald
 retention and an explicit release-retention policy during host operations; this
 package does not delete operator-owned releases automatically.
+
+## Artifact cleanup production contract
+
+Install `deploy/systemd/depress-artifact-cleanup.service` and its matching
+timer under `/etc/systemd/system`. The service runs as the non-login
+`depress-cleanup` identity, reads only
+`/etc/depress/artifact-cleanup.env`, and invokes one bounded cleanup batch.
+The service is `Type=oneshot`, has a 30-minute start timeout, and has no restart
+loop. `depress-artifact-cleanup.timer` uses `OnCalendar=hourly` with
+`Persistent=true`; a host that was down receives one catch-up activation, not
+one activation per missed hour.
+
+Application artifact expiry is seven days. Each cleanup invocation claims at
+most 100 expired rows; abandoned claims become reclaimable after 15 minutes.
+The database role is `depress_cleanup`, distinct from all application and
+migration roles. Create it as a dedicated `LOGIN NOINHERIT` role with no role
+memberships, set its password outside the repository, and apply
+`deploy/postgres/artifact-cleanup-grants.sql` while connected to the production
+application database as its owner. The grant file permits only database
+connection, schema usage, reads of the eight lifecycle/artifact columns needed
+by the claim query, and updates of `artifact_cleanup_token`,
+`artifact_cleanup_started_at`, and `artifact_deleted_at`. It grants no row
+insert/delete, migration, auth-table, outbox, or unrelated-column access.
+
+Run the grant file with `ON_ERROR_STOP` so a refused prerequisite is also a
+nonzero exit:
+
+```bash
+psql -v ON_ERROR_STOP=1 -f deploy/postgres/artifact-cleanup-grants.sql
+```
+
+The whole installation is one transaction, and it verifies two production
+prerequisites against the connected server before granting anything. A refused
+prerequisite rolls back, so it can never leave a partially installed permission
+state:
+
+1. **PostgreSQL server 15 or newer**, read from the server's own
+   `server_version_num`. PostgreSQL 14 is refused.
+2. **`PUBLIC` must not hold `CREATE` on schema `public`.** The script reads the
+   effective schema ACL rather than inferring it from the version, because a
+   database upgraded to 15+ keeps its historical public-schema ACL. A
+   version-15+ server with an inherited `PUBLIC` `CREATE` grant is refused too.
+
+If either prerequisite fails, cleanup permissions are **not** installed and
+production provisioning is blocked until an operator resolves it. The script
+never changes the `PUBLIC` ACL itself: removing `CREATE` from `PUBLIC` is a
+database-wide privilege change, so an operator must first confirm which roles
+still require explicit `CREATE` on schema `public` — migration and application
+roles may rely on it — harden the schema deliberately as a database-security
+action, and only then rerun the installation.
+
+S3-compatible credentials remain separated by process:
+
+- API: read/sign existing private artifacts; no object deletion.
+- Pointer Worker: write `artifacts/*`; no cleanup deletion.
+- Cleanup: `DeleteObject` only for the exact object-resource prefix
+  `<private-bucket>/artifacts/*`; no `PutObject`, `GetObject`, presigning,
+  bucket listing, bucket creation, lifecycle administration, or deletion
+  outside `artifacts/*`.
+
+The provider is intentionally not selected or configured by this repository.
+Production provisioning must add a provider-native lifecycle backstop for the
+`artifacts/` prefix at 14 days, longer than the application's seven-day
+retention. This removes upload orphans that never reached a successful database
+transition. If bucket versioning is enabled, the provider rule must also cover
+noncurrent object versions and delete markers using provider-appropriate
+semantics. Application code must not provision or administer this rule.
+
+### Mandatory production provisioning gates
+
+Production is not ready until an operator records confirmation of every gate:
+
+1. Select an external private S3-compatible provider.
+2. Provision a separate cleanup S3 credential.
+3. Limit cleanup S3 access to `DeleteObject` on `artifacts/*` only.
+4. Confirm the API identity remains read/sign only.
+5. Confirm the Pointer Worker identity remains write only.
+6. Provision the production database on PostgreSQL server 15 or newer with
+   `PUBLIC` holding no `CREATE` on schema `public`, then create
+   `depress_cleanup` and apply the reviewed minimum PostgreSQL grants. The
+   grant script refuses to install if either prerequisite is unmet.
+7. Install `/etc/depress/artifact-cleanup.env` as
+   `root:depress-cleanup` mode `0640`.
+8. Create the non-login `depress-cleanup` system account and private group.
+9. Install `depress-artifact-cleanup.service`.
+10. Install and enable the hourly persistent cleanup timer.
+11. Configure the provider lifecycle backstop for `artifacts/` at 14 days.
+12. If versioning is enabled, cover noncurrent versions and delete markers.
+13. Run one safe cleanup service invocation and verify successful completion.
+14. Verify the timer is enabled and its next activation is scheduled.

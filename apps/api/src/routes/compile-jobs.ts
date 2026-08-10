@@ -11,11 +11,21 @@ import type { MentorAuth } from "../auth/auth";
 import { requireAuthenticatedUser } from "../auth/fastify-auth";
 import type { ArtifactUrlSigner } from "../services/artifact-contracts";
 import {
+  DEFAULT_API_RATE_LIMIT_WINDOW_MS,
+  DEFAULT_COMPILE_RATE_LIMIT_MAX,
+} from "../http-safety";
+import {
   CompileDocumentNotFoundError,
+  CompileInputTooLargeError,
+  CompileJobLimitError,
   CompileProjectionError,
   CompileRevisionConflictError,
   createCompileJobRepository,
 } from "../db/compile-job-repository";
+import {
+  DEFAULT_COMPILE_ACTIVE_JOB_LIMIT,
+  DEFAULT_COMPILE_SNAPSHOT_MAX_BYTES,
+} from "../compile-safety";
 
 const CompileJobIdSchema = z.string().uuid();
 
@@ -24,10 +34,22 @@ export function registerCompileJobRoutes(
   auth: MentorAuth,
   pool: Pool,
   signArtifactUrl?: ArtifactUrlSigner,
+  rateLimit: { max: number; timeWindowMs: number } = {
+    max: DEFAULT_COMPILE_RATE_LIMIT_MAX,
+    timeWindowMs: DEFAULT_API_RATE_LIMIT_WINDOW_MS,
+  },
+  compileSafety: { activeJobLimit: number; snapshotMaxBytes: number } = {
+    activeJobLimit: DEFAULT_COMPILE_ACTIVE_JOB_LIMIT,
+    snapshotMaxBytes: DEFAULT_COMPILE_SNAPSHOT_MAX_BYTES,
+  },
 ): void {
-  const jobs = createCompileJobRepository(pool);
+  const jobs = createCompileJobRepository(pool, compileSafety);
 
-  app.post("/api/compile-jobs", async (request, reply) => {
+  app.post("/api/compile-jobs", {
+    config: {
+      rateLimit: { max: rateLimit.max, timeWindow: rateLimit.timeWindowMs },
+    },
+  }, async (request, reply) => {
     const user = await requireAuthenticatedUser(auth, request, reply);
     if (!user) return;
     const body = CompileJobCreateRequestSchema.safeParse(request.body);
@@ -53,6 +75,12 @@ export function registerCompileJobRoutes(
       }
       if (error instanceof CompileProjectionError) {
         return reply.code(422).send({ error: "COMPILE_PROJECTION_INVALID" });
+      }
+      if (error instanceof CompileInputTooLargeError) {
+        return reply.code(422).send({ error: "COMPILE_INPUT_TOO_LARGE" });
+      }
+      if (error instanceof CompileJobLimitError) {
+        return reply.code(429).send({ error: "COMPILE_JOB_LIMIT" });
       }
       request.log.error({ err: error }, "Compile job creation failed");
       return reply.code(500).send({ error: "COMPILE_JOB_SERVICE_ERROR" });
@@ -102,6 +130,9 @@ export function registerCompileJobRoutes(
               status: job.status,
             }),
           );
+      }
+      if (job.artifactUnavailable) {
+        return reply.code(410).send({ error: "ARTIFACT_EXPIRED" });
       }
       if (!job.artifactKey || !signArtifactUrl) {
         return reply.code(500).send({ error: "ARTIFACT_UNAVAILABLE" });

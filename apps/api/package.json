@@ -9,6 +9,7 @@
   "scripts": {
     "db:migrate": "tsx src/db/migrate-main.ts",
     "auth:seed-mentor": "tsx src/auth/seed-mentor-main.ts",
+    "artifacts:cleanup": "tsx src/artifact-cleanup-main.ts",
     "start:api": "tsx src/server.ts",
     "start:outbox": "tsx src/outbox-main.ts",
     "start:pointer-worker": "tsx src/pointer-worker-main.ts",
@@ -24,9 +25,11 @@
     "@depress/ast": "workspace:*",
     "@depress/transformers": "workspace:*",
     "@fastify/cors": "^11.0.0",
+    "@fastify/rate-limit": "^11.2.0",
     "better-auth": "1.6.25",
     "bullmq": "^5.79.0",
     "fastify": "^5.4.0",
+    "ioredis": "^5.10.1",
     "pg": "^8.22.0",
     "zod": "^3.25.0"
   },

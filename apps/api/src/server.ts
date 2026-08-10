@@ -9,10 +9,15 @@ import { registerHealthRoutes } from "./health";
 import { createS3ArtifactService } from "./services/s3";
 import { createMentorAuth } from "./auth/auth";
 import { createPostgresPool } from "./db/pool";
+import {
+  createRateLimitRedis,
+  registerRateLimitRedisLifecycle,
+} from "./rate-limit-redis";
 
 async function main(): Promise<void> {
   const env = parseApiEnv(process.env);
   const connection = redisConnection(env);
+  const rateLimitRedis = createRateLimitRedis(connection);
   const s3 = createS3ArtifactService();
   const pool = createPostgresPool(env.DATABASE_URL);
   const auth = createMentorAuth(pool, {
@@ -28,17 +33,32 @@ async function main(): Promise<void> {
     authOrigin: env.AUTH_ORIGIN,
     database: pool,
     logLevel: env.LOG_LEVEL,
+    bodyLimitBytes: env.API_BODY_LIMIT_BYTES,
+    rateLimitMax: env.API_RATE_LIMIT_MAX,
+    rateLimitWindowMs: env.API_RATE_LIMIT_WINDOW_MS,
+    doiRateLimitMax: env.DOI_RATE_LIMIT_MAX,
+    compileRateLimitMax: env.COMPILE_RATE_LIMIT_MAX,
+    compileActiveJobLimit: env.COMPILE_ACTIVE_JOB_LIMIT,
+    compileSnapshotMaxBytes: env.COMPILE_SNAPSHOT_MAX_BYTES,
+    rateLimitRedis,
   });
   // Browser calls cross origins (web on :3000, API on :3001); only the
   // configured web origin is allowed.
   await app.register(cors, { origin: env.PUBLIC_ORIGIN, credentials: true });
   const readinessQueue = new Queue("__depress_readiness", { connection });
   registerHealthRoutes(app, async () => {
-    await Promise.all([pool.query("SELECT 1"), readinessQueue.waitUntilReady()]);
+    await Promise.all([
+      pool.query("SELECT 1"),
+      readinessQueue.waitUntilReady(),
+      rateLimitRedis.ping(),
+    ]);
   });
+  registerRateLimitRedisLifecycle(app, rateLimitRedis);
   app.addHook("onClose", async () => {
-    await readinessQueue.close();
-    await pool.end();
+    await Promise.all([
+      readinessQueue.close(),
+      pool.end(),
+    ]);
   });
 
   const close = async () => {

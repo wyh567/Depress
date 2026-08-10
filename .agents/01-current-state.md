@@ -1,9 +1,9 @@
 # 当前真实状态
 
 > **活文档**。任务完成后由 agent 更新对应事实，并在 §7 追加变更记录。
-> 初次快照日期：2026-08-04；最新更新：**2026-08-09（T-03 合并收尾）**。
-> 可信 master：`d3fc0790794f272786a3eea196f5975c2b96360e`；PR #3、#4、#5、#6 均已合并，
-> T-03 post-merge master CI 已通过。T-03 已完成；T-04 是下一任务，仍为 `NOT_STARTED`。
+> 初次快照日期：2026-08-04；最新更新：**2026-08-09（T-04 开始）**。
+> 可信 master：`836cd103baf1bc3a71abf0fff84b73c71dedeb11`；PR #3–#7 均已合并，
+> T-03 已完成；T-04 现为 `IN_PROGRESS`，尚未完成任何验收项。
 
 ---
 
@@ -76,7 +76,7 @@ git status --porcelain -- apps packages deploy e2e docs process.md architecture.
 | P4-07 Web 存取 | ⚠️ PARTIAL | save/load/reopen/冲突处理完整；**无 debounce 自动保存** |
 | P4-08 快照 + outbox | ✅ COMPLETE | 不可变 snapshot/hash + outbox + 幂等 BullMQ job id |
 | P4-09 Worker/Artifact/切换 | ✅ COMPLETE | authenticated pointer 链路全通；T-02 已删除 legacy contract/path |
-| P4-10 安全/生命周期 | ❌ NOT STARTED | 无限流 / 无配额 / 无 artifact 过期 / 无清理；**T-04 是下一工程阻塞** |
+| P4-10 安全/生命周期 | 🟠 IN PROGRESS | T-04 已开始；限流、配额、artifact 过期/清理仍未完成 |
 | P4-11 CD/部署 | ⚠️ PARTIAL | 资产完成并有历史 staging 证据；**生产未部署** |
 | P4-12 生产退出 | ❌ NOT STARTED | 当前 master 无生产部署/验收证据；mentor sign-off pending |
 
@@ -175,7 +175,7 @@ T-05 仍负责 autosave 与 mentor 人工 sign-off，不负责重新决定当前
 
 `process.md` 的 Phase 4 状态、Mentor MVP 范围和退出标准，`architecture.md` 的部署拓扑与账户模型，
 以及 ADR 0007 的状态/决策已同步并经 PR #6 合并到 master。T-03 post-merge CI 为 `SUCCESS`；
-T-04 是下一任务，但仍为 `NOT_STARTED`。
+T-04 已从当前 master 开始，现为 `IN_PROGRESS`。
 
 ---
 
