@@ -20,6 +20,7 @@ import { buildApp } from "../app";
 import { createMentorAuth } from "../auth/auth";
 import { seedMentorAccount } from "../auth/seed-mentor";
 import {
+  CompileJobLimitError,
   createCompileJobRepository,
 } from "../db/compile-job-repository";
 import { createDocumentRepository } from "../db/document-repository";
@@ -100,6 +101,24 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+async function waitForBarrierOrOperationFailure(
+  barrier: Promise<void>,
+  operation: Promise<unknown>,
+  operationName: string,
+): Promise<void> {
+  await Promise.race([
+    barrier,
+    operation.then(
+      () => {
+        throw new Error(`${operationName} completed before its test barrier`);
+      },
+      (error: unknown) => {
+        throw error;
+      },
+    ),
+  ]);
+}
+
 describeDatabase("authenticated persisted compile jobs and outbox", () => {
   let pool: Pool;
   let migrationApply: string[] = [];
@@ -124,7 +143,10 @@ describeDatabase("authenticated persisted compile jobs and outbox", () => {
     await pool.end();
   });
 
-  function createApp(): FastifyInstance {
+  function createApp(options: {
+    compileActiveJobLimit?: number;
+    compileSnapshotMaxBytes?: number;
+  } = {}): FastifyInstance {
     const auth = createMentorAuth(pool, {
       secret: AUTH_SECRET,
       origin: AUTH_ORIGIN,
@@ -134,6 +156,7 @@ describeDatabase("authenticated persisted compile jobs and outbox", () => {
       auth,
       authOrigin: AUTH_ORIGIN,
       database: pool,
+      ...options,
     });
   }
 
@@ -385,7 +408,7 @@ describeDatabase("authenticated persisted compile jobs and outbox", () => {
       const document = await createPersistedDocument(
         mentor.defaultProjectId,
       );
-      const jobs = createCompileJobRepository(pool);
+      const jobs = createCompileJobRepository(pool, { activeJobLimit: 10 });
       const first = await jobs.createForOwner({
         ownerUserId: mentor.userId,
         request: { documentId: document.id, ...COMPILE_INPUT },
@@ -462,6 +485,307 @@ describeDatabase("authenticated persisted compile jobs and outbox", () => {
             (SELECT count(*) FROM compile_outbox)::text AS outbox
         `,
       );
+      expect(counts.rows[0]).toEqual({ jobs: "0", outbox: "0" });
+      await expect(
+        createCompileJobRepository(pool).createForOwner({
+          ownerUserId: mentor.userId,
+          request: { documentId: document.id, ...COMPILE_INPUT },
+        }),
+      ).resolves.toBeDefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("maps the per-owner active-job quota to 429 without creating job or outbox rows", async () => {
+    const app = createApp();
+    try {
+      const mentor = await seedAndLogin(app, MENTOR_A);
+      const document = await createPersistedDocument(mentor.defaultProjectId);
+      expect((await createViaApi({ app, cookie: mentor.cookie, documentId: document.id })).statusCode).toBe(202);
+      expect((await createViaApi({ app, cookie: mentor.cookie, documentId: document.id })).statusCode).toBe(202);
+
+      const rejected = await createViaApi({
+        app,
+        cookie: mentor.cookie,
+        documentId: document.id,
+      });
+      expect(rejected.statusCode).toBe(429);
+      expect(rejected.json()).toEqual({ error: "COMPILE_JOB_LIMIT" });
+      const counts = await pool.query<{ jobs: string; outbox: string }>(`
+        SELECT
+          (SELECT count(*) FROM compile_jobs)::text AS jobs,
+          (SELECT count(*) FROM compile_outbox)::text AS outbox
+      `);
+      expect(counts.rows[0]).toEqual({ jobs: "2", outbox: "2" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("serializes simultaneous creates so one owner never exceeds two active jobs", async () => {
+    const app = createApp();
+    try {
+      const mentor = await seedAndLogin(app, MENTOR_A);
+      const document = await createPersistedDocument(mentor.defaultProjectId);
+      const repository = createCompileJobRepository(pool);
+      const results = await Promise.allSettled(
+        Array.from({ length: 4 }, () =>
+          repository.createForOwner({
+            ownerUserId: mentor.userId,
+            request: { documentId: document.id, ...COMPILE_INPUT },
+          }),
+        ),
+      );
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(2);
+      const rejected = results.filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      expect(rejected).toHaveLength(2);
+      expect(rejected.every((result) => result.reason instanceof CompileJobLimitError)).toBe(true);
+      const counts = await pool.query<{ active: string; outbox: string }>(`
+        SELECT
+          (SELECT count(*) FROM compile_jobs
+           WHERE status IN ('accepted', 'queued', 'processing'))::text AS active,
+          (SELECT count(*) FROM compile_outbox)::text AS outbox
+      `);
+      expect(counts.rows[0]).toEqual({ active: "2", outbox: "2" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("establishes a waiting repeatable-read snapshot after the prior owner transaction commits", async () => {
+    const app = createApp();
+    const firstReachedOutbox = deferred<void>();
+    const releaseFirst = deferred<void>();
+    let firstCreate: Promise<unknown> | undefined;
+    let waitingCreate: Promise<unknown> | undefined;
+    try {
+      const mentor = await seedAndLogin(app, MENTOR_A);
+      const document = await createPersistedDocument(mentor.defaultProjectId);
+      const firstRepository = createCompileJobRepository(pool, {
+        activeJobLimit: 1,
+        beforeOutboxInsert: async (client) => {
+          const isolation = await client.query<{ transaction_isolation: string }>(
+            "SHOW transaction_isolation",
+          );
+          expect(isolation.rows[0]?.transaction_isolation).toBe("repeatable read");
+          firstReachedOutbox.resolve();
+          await releaseFirst.promise;
+        },
+      });
+      const waitingRepository = createCompileJobRepository(pool, {
+        activeJobLimit: 1,
+      });
+
+      firstCreate = firstRepository.createForOwner({
+        ownerUserId: mentor.userId,
+        request: { documentId: document.id, ...COMPILE_INPUT },
+      });
+      await waitForBarrierOrOperationFailure(
+        firstReachedOutbox.promise,
+        firstCreate,
+        "first same-owner create",
+      );
+
+      let waitingCreateSettled = false;
+      waitingCreate = waitingRepository.createForOwner({
+        ownerUserId: mentor.userId,
+        request: { documentId: document.id, ...COMPILE_INPUT },
+      });
+      const waitingOutcome = waitingCreate.then(
+          (value) => ({ status: "fulfilled", value }) as const,
+          (reason: unknown) => ({ status: "rejected", reason }) as const,
+        );
+      void waitingOutcome.then(() => {
+        waitingCreateSettled = true;
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(waitingCreateSettled).toBe(false);
+
+      releaseFirst.resolve();
+      await expect(firstCreate).resolves.toBeDefined();
+      const outcome = await waitingOutcome;
+      expect(outcome.status).toBe("rejected");
+      if (outcome.status === "rejected") {
+        expect(outcome.reason).toBeInstanceOf(CompileJobLimitError);
+      }
+      const counts = await pool.query<{ jobs: string; outbox: string }>(`
+        SELECT
+          (SELECT count(*) FROM compile_jobs)::text AS jobs,
+          (SELECT count(*) FROM compile_outbox)::text AS outbox
+      `);
+      expect(counts.rows[0]).toEqual({ jobs: "1", outbox: "1" });
+    } finally {
+      releaseFirst.resolve();
+      await Promise.allSettled(
+        [firstCreate, waitingCreate].filter(
+          (operation): operation is Promise<unknown> => operation !== undefined,
+        ),
+      );
+      await app.close();
+    }
+  });
+
+  it.each(["accepted", "queued", "processing"] as const)(
+    "counts %s jobs, including stale processing, against the quota",
+    async (status) => {
+      const app = createApp();
+      try {
+        const mentor = await seedAndLogin(app, MENTOR_A);
+        const document = await createPersistedDocument(mentor.defaultProjectId);
+        const repository = createCompileJobRepository(pool);
+        const first = await repository.createForOwner({ ownerUserId: mentor.userId, request: { documentId: document.id, ...COMPILE_INPUT } });
+        const second = await repository.createForOwner({ ownerUserId: mentor.userId, request: { documentId: document.id, ...COMPILE_INPUT } });
+        if (status === "queued") {
+          await pool.query("UPDATE compile_jobs SET status = 'queued'");
+        } else if (status === "processing") {
+          await pool.query(
+            "UPDATE compile_jobs SET status = 'processing', processing_token = id, processing_started_at = now() - interval '30 days'",
+          );
+        }
+        expect([first.resource.status, second.resource.status]).toEqual(["accepted", "accepted"]);
+        await expect(repository.createForOwner({ ownerUserId: mentor.userId, request: { documentId: document.id, ...COMPILE_INPUT } })).rejects.toBeInstanceOf(CompileJobLimitError);
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it.each(["succeeded", "failed"] as const)(
+    "%s jobs release quota capacity",
+    async (status) => {
+      const app = createApp();
+      try {
+        const mentor = await seedAndLogin(app, MENTOR_A);
+        const document = await createPersistedDocument(mentor.defaultProjectId);
+        const repository = createCompileJobRepository(pool);
+        const first = await repository.createForOwner({ ownerUserId: mentor.userId, request: { documentId: document.id, ...COMPILE_INPUT } });
+        await repository.createForOwner({ ownerUserId: mentor.userId, request: { documentId: document.id, ...COMPILE_INPUT } });
+        if (status === "succeeded") {
+          await pool.query(
+            "UPDATE compile_jobs SET status = 'succeeded', artifact_key = 'test.pdf', artifact_byte_length = 5 WHERE id = $1",
+            [first.resource.jobId],
+          );
+        } else {
+          await pool.query(
+            "UPDATE compile_jobs SET status = 'failed', error_code = 'COMPILE_FAILED' WHERE id = $1",
+            [first.resource.jobId],
+          );
+        }
+        await expect(repository.createForOwner({ ownerUserId: mentor.userId, request: { documentId: document.id, ...COMPILE_INPUT } })).resolves.toBeDefined();
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it("scopes quota and advisory locking per owner", async () => {
+    const app = createApp();
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    let blockedA: Promise<unknown> | undefined;
+    let ownerB: Promise<unknown> | undefined;
+    try {
+      const mentorA = await seedAndLogin(app, MENTOR_A);
+      const mentorB = await seedAndLogin(app, MENTOR_B);
+      const documentA = await createPersistedDocument(mentorA.defaultProjectId);
+      const documentB = await createPersistedDocument(mentorB.defaultProjectId);
+      blockedA = createCompileJobRepository(pool, {
+        beforeOutboxInsert: async () => {
+          entered.resolve();
+          await release.promise;
+        },
+      }).createForOwner({ ownerUserId: mentorA.userId, request: { documentId: documentA.id, ...COMPILE_INPUT } });
+      await waitForBarrierOrOperationFailure(
+        entered.promise,
+        blockedA,
+        "owner A create",
+      );
+      ownerB = createCompileJobRepository(pool).createForOwner({
+        ownerUserId: mentorB.userId,
+        request: { documentId: documentB.id, ...COMPILE_INPUT },
+      });
+      void ownerB.catch(() => undefined);
+      await expect(Promise.race([
+        ownerB,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("owner B blocked")), 1_000)),
+      ])).resolves.toBeDefined();
+      release.resolve();
+      await expect(blockedA).resolves.toBeDefined();
+    } finally {
+      release.resolve();
+      await Promise.allSettled(
+        [blockedA, ownerB].filter(
+          (operation): operation is Promise<unknown> => operation !== undefined,
+        ),
+      );
+      await app.close();
+    }
+  });
+
+  it("allows an owner with capacity when another owner is quota-saturated", async () => {
+    const app = createApp();
+    try {
+      const mentorA = await seedAndLogin(app, MENTOR_A);
+      const mentorB = await seedAndLogin(app, MENTOR_B);
+      const documentA = await createPersistedDocument(mentorA.defaultProjectId);
+      const documentB = await createPersistedDocument(mentorB.defaultProjectId);
+      const repository = createCompileJobRepository(pool);
+
+      await repository.createForOwner({
+        ownerUserId: mentorA.userId,
+        request: { documentId: documentA.id, ...COMPILE_INPUT },
+      });
+      await repository.createForOwner({
+        ownerUserId: mentorA.userId,
+        request: { documentId: documentA.id, ...COMPILE_INPUT },
+      });
+      await expect(
+        repository.createForOwner({
+          ownerUserId: mentorA.userId,
+          request: { documentId: documentA.id, ...COMPILE_INPUT },
+        }),
+      ).rejects.toBeInstanceOf(CompileJobLimitError);
+
+      await expect(
+        repository.createForOwner({
+          ownerUserId: mentorB.userId,
+          request: { documentId: documentB.id, ...COMPILE_INPUT },
+        }),
+      ).resolves.toBeDefined();
+
+      const counts = await pool.query<{ count: string; owner_user_id: string }>(`
+        SELECT projects.owner_user_id, count(*)::text AS count
+        FROM compile_jobs AS jobs
+        JOIN projects ON projects.id = jobs.project_id
+        GROUP BY projects.owner_user_id
+      `);
+      const countsByOwner = new Map(
+        counts.rows.map((row) => [row.owner_user_id, Number(row.count)]),
+      );
+      expect(countsByOwner.get(mentorA.userId)).toBe(2);
+      expect(countsByOwner.get(mentorB.userId)).toBe(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("maps oversized canonical snapshots to 422 and creates nothing", async () => {
+    const app = createApp({ compileSnapshotMaxBytes: 128 });
+    try {
+      const mentor = await seedAndLogin(app, MENTOR_A);
+      const document = await createPersistedDocument(mentor.defaultProjectId);
+      const response = await createViaApi({ app, cookie: mentor.cookie, documentId: document.id });
+      expect(response.statusCode).toBe(422);
+      expect(response.json()).toEqual({ error: "COMPILE_INPUT_TOO_LARGE" });
+      const counts = await pool.query<{ jobs: string; outbox: string }>(`
+        SELECT
+          (SELECT count(*) FROM compile_jobs)::text AS jobs,
+          (SELECT count(*) FROM compile_outbox)::text AS outbox
+      `);
       expect(counts.rows[0]).toEqual({ jobs: "0", outbox: "0" });
     } finally {
       await app.close();

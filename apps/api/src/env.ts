@@ -6,6 +6,12 @@ import {
   DEFAULT_COMPILE_RATE_LIMIT_MAX,
   DEFAULT_DOI_RATE_LIMIT_MAX,
 } from "./http-safety";
+import {
+  DEFAULT_COMPILE_ACTIVE_JOB_LIMIT,
+  DEFAULT_COMPILE_SNAPSHOT_MAX_BYTES,
+  MAX_COMPILE_ACTIVE_JOB_LIMIT,
+  MAX_COMPILE_SNAPSHOT_MAX_BYTES,
+} from "./compile-safety";
 
 const emptyToUndefined = (value: unknown) =>
   typeof value === "string" && value.trim() === "" ? undefined : value;
@@ -92,6 +98,18 @@ const ApiEnvSchema = z
       .positive()
       .max(1_000)
       .default(DEFAULT_COMPILE_RATE_LIMIT_MAX),
+    COMPILE_ACTIVE_JOB_LIMIT: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(MAX_COMPILE_ACTIVE_JOB_LIMIT)
+      .default(DEFAULT_COMPILE_ACTIVE_JOB_LIMIT),
+    COMPILE_SNAPSHOT_MAX_BYTES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(MAX_COMPILE_SNAPSHOT_MAX_BYTES)
+      .default(DEFAULT_COMPILE_SNAPSHOT_MAX_BYTES),
     PUBLIC_ORIGIN: z.string().url(),
     BETTER_AUTH_SECRET: z.string().min(32),
     AUTH_ORIGIN: z.string().url(),

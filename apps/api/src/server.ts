@@ -38,6 +38,8 @@ async function main(): Promise<void> {
     rateLimitWindowMs: env.API_RATE_LIMIT_WINDOW_MS,
     doiRateLimitMax: env.DOI_RATE_LIMIT_MAX,
     compileRateLimitMax: env.COMPILE_RATE_LIMIT_MAX,
+    compileActiveJobLimit: env.COMPILE_ACTIVE_JOB_LIMIT,
+    compileSnapshotMaxBytes: env.COMPILE_SNAPSHOT_MAX_BYTES,
     rateLimitRedis,
   });
   // Browser calls cross origins (web on :3000, API on :3001); only the

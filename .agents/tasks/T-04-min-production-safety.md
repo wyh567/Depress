@@ -130,3 +130,22 @@ T-04 不开放公共注册，也不改变账户模型。现在的空白（全仓
 ## 阻塞记录
 
 -
+
+## T04-B implementation record (uncommitted)
+
+- Scope: per-user active compile-job quota and canonical snapshot hard cap only.
+- Active quota: 2 jobs in `accepted|queued|processing`, serialized by an
+  owner-keyed PostgreSQL session-gate handoff to a transaction advisory lock
+  before `COUNT -> INSERT` under `REPEATABLE READ`.
+- Snapshot cap: 2,097,152 UTF-8 bytes measured on canonical JSON before job
+  and outbox insertion.
+- Route-local errors: `429 COMPILE_JOB_LIMIT` and
+  `422 COMPILE_INPUT_TOO_LARGE`; no `packages/ast` change.
+- Validation: T04-B passed serialized real PostgreSQL 16 integration
+  validation with all T04-B database tests executed and zero skips. The
+  owner-scoped quota race protection, repeatable-read snapshot handoff, lock
+  cleanup paths, and canonical UTF-8 snapshot byte cap were validated.
+- T04-C/D, migration 0006, artifact lifecycle, cleanup, stale-job
+  reconciliation, and generated-PDF limits remain unimplemented.
+- T-04 status remains `IN_PROGRESS`; T04-C/D and the remaining T-04 slices
+  remain pending, as do review/commit/merge.

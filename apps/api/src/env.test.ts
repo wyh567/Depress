@@ -29,6 +29,8 @@ describe("runtime environment contracts", () => {
       API_RATE_LIMIT_WINDOW_MS: 60_000,
       DOI_RATE_LIMIT_MAX: 10,
       COMPILE_RATE_LIMIT_MAX: 5,
+      COMPILE_ACTIVE_JOB_LIMIT: 2,
+      COMPILE_SNAPSHOT_MAX_BYTES: 2_097_152,
       PUBLIC_ORIGIN: "http://localhost:3000",
       AUTH_ORIGIN: "http://localhost:3000",
       REDIS_HOST: "localhost",
@@ -50,6 +52,14 @@ describe("runtime environment contracts", () => {
       ["API_RATE_LIMIT_WINDOW_MS", 3_600_001],
       ["DOI_RATE_LIMIT_MAX", "not-a-number"],
       ["COMPILE_RATE_LIMIT_MAX", 0],
+      ["COMPILE_ACTIVE_JOB_LIMIT", 0],
+      ["COMPILE_ACTIVE_JOB_LIMIT", -1],
+      ["COMPILE_ACTIVE_JOB_LIMIT", 1.5],
+      ["COMPILE_ACTIVE_JOB_LIMIT", 101],
+      ["COMPILE_SNAPSHOT_MAX_BYTES", 0],
+      ["COMPILE_SNAPSHOT_MAX_BYTES", -1],
+      ["COMPILE_SNAPSHOT_MAX_BYTES", 1.5],
+      ["COMPILE_SNAPSHOT_MAX_BYTES", 16_777_217],
     ] as const;
 
     for (const [name, value] of invalid) {

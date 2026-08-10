@@ -19,6 +19,11 @@ import {
   rateLimitError,
   type ApiSafetyOptions,
 } from "./http-safety";
+import {
+  DEFAULT_COMPILE_ACTIVE_JOB_LIMIT,
+  DEFAULT_COMPILE_SNAPSHOT_MAX_BYTES,
+  type CompileSafetyOptions,
+} from "./compile-safety";
 
 // buildApp never listens on a port — callers (tests via app.inject, a future
 // server entrypoint via app.listen) decide that.
@@ -38,7 +43,7 @@ export function buildApp(
     authOrigin?: string;
     database?: Pool;
     logLevel?: "fatal" | "error" | "warn" | "info" | "debug";
-  } & ApiSafetyOptions = {}
+  } & ApiSafetyOptions & CompileSafetyOptions = {}
 ): FastifyInstance {
   const bodyLimitBytes = options.bodyLimitBytes ?? DEFAULT_API_BODY_LIMIT_BYTES;
   const rateLimitMax = options.rateLimitMax ?? DEFAULT_API_RATE_LIMIT_MAX;
@@ -47,6 +52,10 @@ export function buildApp(
   const doiRateLimitMax = options.doiRateLimitMax ?? DEFAULT_DOI_RATE_LIMIT_MAX;
   const compileRateLimitMax =
     options.compileRateLimitMax ?? DEFAULT_COMPILE_RATE_LIMIT_MAX;
+  const compileActiveJobLimit =
+    options.compileActiveJobLimit ?? DEFAULT_COMPILE_ACTIVE_JOB_LIMIT;
+  const compileSnapshotMaxBytes =
+    options.compileSnapshotMaxBytes ?? DEFAULT_COMPILE_SNAPSHOT_MAX_BYTES;
   const app = Fastify({
     logger: options.logLevel ? { level: options.logLevel } : false,
     bodyLimit: bodyLimitBytes,
@@ -118,6 +127,10 @@ export function buildApp(
           options.database,
           options.signArtifactUrl,
           { max: compileRateLimitMax, timeWindowMs: rateLimitWindowMs },
+          {
+            activeJobLimit: compileActiveJobLimit,
+            snapshotMaxBytes: compileSnapshotMaxBytes,
+          },
         );
       }
     }
