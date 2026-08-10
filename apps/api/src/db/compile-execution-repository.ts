@@ -106,6 +106,7 @@ export function createCompileExecutionRepository(pool: Pool) {
           SET status = 'succeeded',
               artifact_key = $3,
               artifact_byte_length = $4,
+              expires_at = now() + interval '7 days',
               error_code = NULL,
               processing_token = NULL,
               processing_started_at = NULL,

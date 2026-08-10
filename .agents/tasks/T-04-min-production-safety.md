@@ -131,7 +131,9 @@ T-04 不开放公共注册，也不改变账户模型。现在的空白（全仓
 
 -
 
-## T04-B implementation record (uncommitted)
+## T04 implementation record
+
+- T04-A was validated and committed at `66b8c399`.
 
 - Scope: per-user active compile-job quota and canonical snapshot hard cap only.
 - Active quota: 2 jobs in `accepted|queued|processing`, serialized by an
@@ -145,7 +147,18 @@ T-04 不开放公共注册，也不改变账户模型。现在的空白（全仓
   validation with all T04-B database tests executed and zero skips. The
   owner-scoped quota race protection, repeatable-read snapshot handoff, lock
   cleanup paths, and canonical UTF-8 snapshot byte cap were validated.
-- T04-C/D, migration 0006, artifact lifecycle, cleanup, stale-job
-  reconciliation, and generated-PDF limits remain unimplemented.
-- T-04 status remains `IN_PROGRESS`; T04-C/D and the remaining T-04 slices
-  remain pending, as do review/commit/merge.
+- T04-B was committed at `f0f9d99b` after review and real PostgreSQL
+  validation.
+- T04-C1 implementation candidate is complete and passed real PostgreSQL 16
+  validation: migration `0006_artifact_lifecycle.sql`, seven-day DB-time
+  artifact expiry, historical succeeded-row backfill from `updated_at`, and
+  owner-scoped expired/deleted download responses are implemented.
+- T04-C2 implementation candidate is complete and passed isolated real
+  PostgreSQL 16 and repository-pinned MinIO validation: bounded concurrent
+  cleanup claims, 15-minute stale reclaim, exact-key idempotent `DeleteObject`,
+  token-owned finalization, crash-window recovery, and the one-shot cleanup
+  CLI are implemented.
+- T04-C implementation is complete but is not yet committed or final-reviewed.
+  T04-D deployment identity/permissions and systemd scheduling remain pending;
+  stale-job reconciliation and generated-PDF limits also remain pending.
+- T-04 status remains `IN_PROGRESS`.

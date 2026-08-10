@@ -1,4 +1,5 @@
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -44,13 +45,13 @@ export interface S3ArtifactService {
   getSignedDownloadUrl(key: string): Promise<string>;
 }
 
-// Client and presigner are injectable so tests never touch AWS.
-export function createS3ArtifactService(
-  deps: { client?: S3Client; presign?: typeof getSignedUrl } = {},
-): S3ArtifactService {
-  const client =
-    deps.client ??
-    new S3Client({
+export interface S3ArtifactCleanupService {
+  deleteArtifact(key: string): Promise<void>;
+  close(): void;
+}
+
+function createConfiguredS3Client(): S3Client {
+  return new S3Client({
       region: env.S3_REGION,
       credentials: {
         accessKeyId: env.S3_ACCESS_KEY_ID,
@@ -60,6 +61,13 @@ export function createS3ArtifactService(
         ? { endpoint: env.S3_ENDPOINT, forcePathStyle: true }
         : {}),
     });
+}
+
+// Client and presigner are injectable so tests never touch AWS.
+export function createS3ArtifactService(
+  deps: { client?: S3Client; presign?: typeof getSignedUrl } = {},
+): S3ArtifactService {
+  const client = deps.client ?? createConfiguredS3Client();
   const presign = deps.presign ?? getSignedUrl;
 
   return {
@@ -79,6 +87,22 @@ export function createS3ArtifactService(
         new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key }),
         { expiresIn: SIGNED_URL_TTL_SECONDS },
       );
+    },
+  };
+}
+
+export function createS3ArtifactCleanupService(
+  deps: { client?: S3Client } = {},
+): S3ArtifactCleanupService {
+  const client = deps.client ?? createConfiguredS3Client();
+  return {
+    async deleteArtifact(key) {
+      await client.send(
+        new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }),
+      );
+    },
+    close() {
+      client.destroy();
     },
   };
 }

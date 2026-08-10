@@ -666,7 +666,7 @@ describeDatabase("authenticated persisted compile jobs and outbox", () => {
         await repository.createForOwner({ ownerUserId: mentor.userId, request: { documentId: document.id, ...COMPILE_INPUT } });
         if (status === "succeeded") {
           await pool.query(
-            "UPDATE compile_jobs SET status = 'succeeded', artifact_key = 'test.pdf', artifact_byte_length = 5 WHERE id = $1",
+            "UPDATE compile_jobs SET status = 'succeeded', artifact_key = 'test.pdf', artifact_byte_length = 5, expires_at = now() + interval '7 days' WHERE id = $1",
             [first.resource.jobId],
           );
         } else {

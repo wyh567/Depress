@@ -9,6 +9,7 @@
   "scripts": {
     "db:migrate": "tsx src/db/migrate-main.ts",
     "auth:seed-mentor": "tsx src/auth/seed-mentor-main.ts",
+    "artifacts:cleanup": "tsx src/artifact-cleanup-main.ts",
     "start:api": "tsx src/server.ts",
     "start:outbox": "tsx src/outbox-main.ts",
     "start:pointer-worker": "tsx src/pointer-worker-main.ts",

@@ -131,6 +131,9 @@ export function registerCompileJobRoutes(
             }),
           );
       }
+      if (job.artifactUnavailable) {
+        return reply.code(410).send({ error: "ARTIFACT_EXPIRED" });
+      }
       if (!job.artifactKey || !signArtifactUrl) {
         return reply.code(500).send({ error: "ARTIFACT_UNAVAILABLE" });
       }

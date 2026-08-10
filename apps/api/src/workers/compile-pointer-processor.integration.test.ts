@@ -149,8 +149,9 @@ describeDatabase("persisted compile pointer worker and download boundary", () =>
       error_code: string | null;
       artifact_key: string | null;
       artifact_byte_length: number | null;
+      expires_at: Date | null;
     }>(
-      `SELECT status, error_code, artifact_key, artifact_byte_length
+      `SELECT status, error_code, artifact_key, artifact_byte_length, expires_at
        FROM compile_jobs WHERE id = $1`,
       [jobId],
     );
@@ -171,6 +172,9 @@ describeDatabase("persisted compile pointer worker and download boundary", () =>
   it("claims queued work once, uses the trusted snapshot, and makes duplicates no-ops", async () => {
     const { created } = await createQueuedJob();
     const { deps, compile, uploadArtifact } = dependencies();
+    const before = await pool.query<{ now: Date }>(
+      "SELECT clock_timestamp() AS now",
+    );
     const pointer = {
       jobId: created.resource.jobId,
       snapshotHash: created.resource.snapshotHash,
@@ -193,12 +197,24 @@ describeDatabase("persisted compile pointer worker and download boundary", () =>
       `artifacts/${pointer.jobId}.pdf`,
       PDF,
     );
-    expect(await stored(pointer.jobId)).toEqual({
+    const after = await pool.query<{ now: Date }>(
+      "SELECT clock_timestamp() AS now",
+    );
+    const persisted = await stored(pointer.jobId);
+    expect(persisted).toMatchObject({
       status: "succeeded",
       error_code: null,
       artifact_key: `artifacts/${pointer.jobId}.pdf`,
       artifact_byte_length: PDF.byteLength,
     });
+    expect(persisted.expires_at).toBeInstanceOf(Date);
+    const retentionMs = 7 * 24 * 60 * 60 * 1_000;
+    expect(persisted.expires_at!.getTime()).toBeGreaterThanOrEqual(
+      before.rows[0]!.now.getTime() + retentionMs,
+    );
+    expect(persisted.expires_at!.getTime()).toBeLessThanOrEqual(
+      after.rows[0]!.now.getTime() + retentionMs,
+    );
   });
 
   it("rejects queue field injection, wrong hashes, missing jobs, and invalid snapshots safely", async () => {
@@ -317,6 +333,7 @@ describeDatabase("persisted compile pointer worker and download boundary", () =>
         error_code: testCase.expected,
         artifact_key: null,
         artifact_byte_length: null,
+        expires_at: null,
       });
       expect(JSON.stringify(outcome)).not.toMatch(/docker|credentials/i);
       await expect(
@@ -466,7 +483,8 @@ describeDatabase("persisted compile pointer worker and download boundary", () =>
     await pool.query(
       `UPDATE compile_jobs
        SET status = 'succeeded', artifact_key = $2,
-           artifact_byte_length = $3
+           artifact_byte_length = $3,
+           expires_at = now() + interval '7 days'
        WHERE id = $1`,
       [jobId, `artifacts/${jobId}.pdf`, PDF.byteLength],
     );
@@ -500,6 +518,45 @@ describeDatabase("persisted compile pointer worker and download boundary", () =>
       });
       expect(download.body).not.toContain(`artifacts/${jobId}.pdf`);
       expect(signer).toHaveBeenCalledWith(`artifacts/${jobId}.pdf`);
+      expect(signer).toHaveBeenCalledTimes(1);
+
+      signer.mockClear();
+      await pool.query(
+        "UPDATE compile_jobs SET expires_at = now() - interval '1 second' WHERE id = $1",
+        [jobId],
+      );
+      const expired = await reconstructed.inject({
+        method: "GET",
+        url: `/api/compile-jobs/${jobId}/download`,
+        headers: { cookie: ownerCookie },
+      });
+      expect(expired.statusCode).toBe(410);
+      expect(expired.json()).toEqual({ error: "ARTIFACT_EXPIRED" });
+      expect(signer).not.toHaveBeenCalled();
+
+      const foreignExpired = await reconstructed.inject({
+        method: "GET",
+        url: `/api/compile-jobs/${jobId}/download`,
+        headers: { cookie: foreignCookie },
+      });
+      expect(foreignExpired.statusCode).toBe(404);
+      expect(foreignExpired.json()).toEqual({ error: "COMPILE_JOB_NOT_FOUND" });
+      expect(signer).not.toHaveBeenCalled();
+
+      await pool.query(
+        `UPDATE compile_jobs
+         SET expires_at = now() + interval '7 days', artifact_deleted_at = now()
+         WHERE id = $1`,
+        [jobId],
+      );
+      const deleted = await reconstructed.inject({
+        method: "GET",
+        url: `/api/compile-jobs/${jobId}/download`,
+        headers: { cookie: ownerCookie },
+      });
+      expect(deleted.statusCode).toBe(410);
+      expect(deleted.json()).toEqual({ error: "ARTIFACT_EXPIRED" });
+      expect(signer).not.toHaveBeenCalled();
     } finally {
       await reconstructed.close();
     }

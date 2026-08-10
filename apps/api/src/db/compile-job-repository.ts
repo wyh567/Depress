@@ -83,11 +83,13 @@ interface CompileJobRow {
 interface CompileJobArtifactRow {
   status: string;
   artifact_key: string | null;
+  artifact_unavailable: boolean;
 }
 
 export interface CompileJobArtifactState {
   status: PersistedCompileJobStatus;
   artifactKey: string | null;
+  artifactUnavailable: boolean;
 }
 
 export interface CreatedCompileJob {
@@ -394,7 +396,16 @@ export function createCompileJobRepository(
     ): Promise<CompileJobArtifactState | undefined> {
       const result = await pool.query<CompileJobArtifactRow>(
         `
-          SELECT jobs.status, jobs.artifact_key
+          SELECT
+            jobs.status,
+            jobs.artifact_key,
+            CASE
+              WHEN jobs.status = 'succeeded' THEN (
+                jobs.artifact_deleted_at IS NOT NULL OR
+                jobs.expires_at <= now()
+              )
+              ELSE false
+            END AS artifact_unavailable
           FROM compile_jobs AS jobs
           JOIN projects ON projects.id = jobs.project_id
           WHERE jobs.id = $1 AND projects.owner_user_id = $2
@@ -406,6 +417,7 @@ export function createCompileJobRepository(
         ? {
             status: PersistedCompileJobStatusSchema.parse(row.status),
             artifactKey: row.artifact_key,
+            artifactUnavailable: row.artifact_unavailable,
           }
         : undefined;
     },
