@@ -16,6 +16,7 @@ readonly API_USER="d10a-${SUFFIX}"
 readonly OUTBOX_USER="d10o-${SUFFIX}"
 readonly WORKER_USER="d10w-${SUFFIX}"
 readonly MIGRATION_USER="d10m-${SUFFIX}"
+readonly CLEANUP_USER="d10c-${SUFFIX}"
 readonly WEB_USER="d10b-${SUFFIX}"
 readonly DOCKER_GROUP="d10d-${SUFFIX}"
 readonly RELEASE_GROUP="d10r-${SUFFIX}"
@@ -24,6 +25,7 @@ readonly -a TEST_USERS=(
   "$OUTBOX_USER"
   "$WORKER_USER"
   "$MIGRATION_USER"
+  "$CLEANUP_USER"
   "$WEB_USER"
 )
 readonly -a TEST_GROUPS=(
@@ -31,6 +33,7 @@ readonly -a TEST_GROUPS=(
   "$OUTBOX_USER"
   "$WORKER_USER"
   "$MIGRATION_USER"
+  "$CLEANUP_USER"
   "$WEB_USER"
   "$DOCKER_GROUP"
   "$RELEASE_GROUP"
@@ -95,11 +98,13 @@ touch \
   "${ENV_DIR}/outbox.env" \
   "${ENV_DIR}/worker.env" \
   "${ENV_DIR}/migration.env" \
+  "${ENV_DIR}/artifact-cleanup.env" \
   "${ENV_DIR}/web.env"
 chown "root:${API_USER}" "${ENV_DIR}/api.env"
 chown "root:${OUTBOX_USER}" "${ENV_DIR}/outbox.env"
 chown "root:${WORKER_USER}" "${ENV_DIR}/worker.env"
 chown "root:${MIGRATION_USER}" "${ENV_DIR}/migration.env"
+chown "root:${CLEANUP_USER}" "${ENV_DIR}/artifact-cleanup.env"
 chown "root:${WEB_USER}" "${ENV_DIR}/web.env"
 chmod 0640 "${ENV_DIR}"/*.env
 chmod 0700 "$OPERATOR_CWD"
@@ -118,6 +123,8 @@ run_verify() {
     DEPRESS_WORKER_GROUP="$WORKER_USER" \
     DEPRESS_MIGRATION_USER="$MIGRATION_USER" \
     DEPRESS_MIGRATION_GROUP="$MIGRATION_USER" \
+    DEPRESS_CLEANUP_USER="$CLEANUP_USER" \
+    DEPRESS_CLEANUP_GROUP="$CLEANUP_USER" \
     DEPRESS_WEB_USER="$WEB_USER" \
     DEPRESS_WEB_GROUP="$WEB_USER" \
     DEPRESS_DOCKER_GROUP="$DOCKER_GROUP" \
@@ -131,6 +138,7 @@ run_verify > "${SANDBOX}/positive.log"
 grep -Fxq "env_permission_matrix=PASS" "${SANDBOX}/positive.log"
 grep -Fxq "worker_docker=ALLOWED" "${SANDBOX}/positive.log"
 grep -Fxq "web_cross_read=DENIED" "${SANDBOX}/positive.log"
+grep -Fxq "cleanup_cross_read=DENIED" "${SANDBOX}/positive.log"
 grep -Fxq "web_docker=DENIED" "${SANDBOX}/positive.log"
 grep -Fxq "release_group_membership=PASS" "${SANDBOX}/positive.log"
 echo "PASS: root:root 0711 permits only the intended file reads"
@@ -202,6 +210,16 @@ fi
 if run_as_identity_from_safe_cwd "$WEB_USER" \
   /usr/bin/test -r "${ENV_DIR}/api.env"; then
   echo "permission test failed: Web can read API env" >&2
+  exit 1
+fi
+if run_as_identity_from_safe_cwd "$CLEANUP_USER" \
+  /usr/bin/test -r "${ENV_DIR}/api.env"; then
+  echo "permission test failed: Cleanup can read API env" >&2
+  exit 1
+fi
+if run_as_identity_from_safe_cwd "$API_USER" \
+  /usr/bin/test -r "${ENV_DIR}/artifact-cleanup.env"; then
+  echo "permission test failed: API can read Cleanup env" >&2
   exit 1
 fi
 echo "PASS: cross-service reads remain denied"

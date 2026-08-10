@@ -25,13 +25,17 @@ readonly worker_user=${DEPRESS_WORKER_USER:-depress-worker}
 readonly worker_group=${DEPRESS_WORKER_GROUP:-depress-worker}
 readonly migration_user=${DEPRESS_MIGRATION_USER:-depress-migration}
 readonly migration_group=${DEPRESS_MIGRATION_GROUP:-depress-migration}
+readonly cleanup_user=${DEPRESS_CLEANUP_USER:-depress-cleanup}
+readonly cleanup_group=${DEPRESS_CLEANUP_GROUP:-depress-cleanup}
 readonly web_user=${DEPRESS_WEB_USER:-depress-web}
 readonly web_group=${DEPRESS_WEB_GROUP:-depress-web}
 readonly -a runtime_users=(
   "$web_user" "$api_user" "$outbox_user" "$worker_user" "$migration_user"
+  "$cleanup_user"
 )
 readonly -a private_groups=(
   "$web_group" "$api_group" "$outbox_group" "$worker_group" "$migration_group"
+  "$cleanup_group"
 )
 active_failure_classification=RELEASE_RUNTIME_READ_PERMISSION_DEFECT
 

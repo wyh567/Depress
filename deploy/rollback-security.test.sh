@@ -12,8 +12,8 @@ SANDBOX=$(mktemp -d)
 chmod 0711 "$SANDBOX"
 readonly SUFFIX="${BASHPID}"
 readonly RELEASE_GROUP="dprb${SUFFIX}"
-readonly -a TEST_USERS=("dbw${SUFFIX}" "dba${SUFFIX}" "dbo${SUFFIX}" "dbj${SUFFIX}" "dbm${SUFFIX}")
-readonly -a TEST_GROUPS=("dgbw${SUFFIX}" "dgba${SUFFIX}" "dgbo${SUFFIX}" "dgbj${SUFFIX}" "dgbm${SUFFIX}")
+readonly -a TEST_USERS=("dbw${SUFFIX}" "dba${SUFFIX}" "dbo${SUFFIX}" "dbj${SUFFIX}" "dbm${SUFFIX}" "dbc${SUFFIX}")
+readonly -a TEST_GROUPS=("dgbw${SUFFIX}" "dgba${SUFFIX}" "dgbo${SUFFIX}" "dgbj${SUFFIX}" "dgbm${SUFFIX}" "dgbc${SUFFIX}")
 created_users=()
 created_groups=()
 cleanup() {
@@ -60,6 +60,7 @@ run_rollback() {
     DEPRESS_OUTBOX_USER="${TEST_USERS[2]}" DEPRESS_OUTBOX_GROUP="${TEST_GROUPS[2]}" \
     DEPRESS_WORKER_USER="${TEST_USERS[3]}" DEPRESS_WORKER_GROUP="${TEST_GROUPS[3]}" \
     DEPRESS_MIGRATION_USER="${TEST_USERS[4]}" DEPRESS_MIGRATION_GROUP="${TEST_GROUPS[4]}" \
+    DEPRESS_CLEANUP_USER="${TEST_USERS[5]}" DEPRESS_CLEANUP_GROUP="${TEST_GROUPS[5]}" \
     SYSTEMCTL_BIN="$systemctl_bin" HEALTH_CHECK_BIN="$HEALTH" \
     bash "${SCRIPT_DIR}/rollback.sh" "$target"
 }
@@ -76,6 +77,7 @@ for release in "${ROOT}/releases/${OLD_SHA}" "${ROOT}/releases/${NEW_SHA}"; do
     DEPRESS_OUTBOX_USER="${TEST_USERS[2]}" DEPRESS_OUTBOX_GROUP="${TEST_GROUPS[2]}" \
     DEPRESS_WORKER_USER="${TEST_USERS[3]}" DEPRESS_WORKER_GROUP="${TEST_GROUPS[3]}" \
     DEPRESS_MIGRATION_USER="${TEST_USERS[4]}" DEPRESS_MIGRATION_GROUP="${TEST_GROUPS[4]}" \
+    DEPRESS_CLEANUP_USER="${TEST_USERS[5]}" DEPRESS_CLEANUP_GROUP="${TEST_GROUPS[5]}" \
     bash "${SCRIPT_DIR}/release-permissions.sh" normalize "$release" >/dev/null
 done
 ln -s "${ROOT}/releases/${OLD_SHA}" "${ROOT}/current"
