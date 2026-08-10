@@ -156,13 +156,36 @@ T-04 不开放公共注册，也不改变账户模型。现在的空白（全仓
   claims, 15-minute stale reclaim, exact-key idempotent `DeleteObject`,
   token-owned finalization, crash-window recovery, and the one-shot cleanup
   CLI.
-- T04-D implementation candidate is complete and validated but is not yet
-  committed or final-reviewed. It adds the separate `depress-cleanup` runtime
-  identity and environment, least-privilege PostgreSQL/S3 permission model,
-  hardened one-shot systemd service, hourly persistent timer, release
+- T04-D was committed at `02c8920b`. It adds the separate `depress-cleanup`
+  runtime identity and environment, least-privilege PostgreSQL/S3 permission
+  model, hardened one-shot systemd service, hourly persistent timer, release
   permission support, and documented production provisioning gates. No
   production or cloud infrastructure was mutated, and the provider-specific
   14-day lifecycle backstop remains an operator gate until provisioning.
+- The whole-branch final review of `origin/master...02c8920b` returned
+  `BLOCKED` on one MAJOR: `artifact-cleanup-grants.sql` revoked privileges only
+  from `depress_cleanup` and never accounted for privileges inherited through
+  `PUBLIC`. Because `host-preflight.sh` gates the host on Ubuntu 22.04 (which
+  ships PostgreSQL 14, where `PUBLIC` holds `CREATE` on schema `public` by
+  default) and no deployment document established a PostgreSQL server minimum,
+  the documented provisioning path could install a cleanup role that silently
+  retained `CREATE`.
+- The narrow repair is implemented and validated but is **not yet committed**.
+  The grant script now fails closed inside its existing transaction on two
+  prerequisites read from the connected server: PostgreSQL server `>= 15`, and
+  `PUBLIC` not holding `CREATE` on schema `public` (checked against the
+  effective schema ACL, because a database upgraded to 15+ keeps its historical
+  ACL). The script still never mutates the global `PUBLIC` ACL — that stays a
+  deliberate operator action. Validated against disposable real servers:
+  PostgreSQL 14.23 refuses installation on the version guard with nothing
+  granted; PostgreSQL 16.14 with default ACL installs exactly the reviewed
+  privileges; PostgreSQL 16.14 with a deliberately unsafe `PUBLIC CREATE` ACL
+  refuses installation on the `PUBLIC` guard.
+- Retained as MINOR for final review, deliberately not repaired here to avoid
+  scope creep: the permission integration test uses the production-named role
+  `depress_cleanup` and its teardown would be destructive if
+  `DEPRESS_POSTGRES_ADMIN_TEST_URL` were pointed at production. That variable
+  is also still undocumented in `02-agent-rules.md` §5.
 - Deferred follow-ups remain out of T-04 scope: stale active-job
   reconciliation, a generated-PDF hard-size limit, and the public DOI routing
   gap.

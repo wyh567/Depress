@@ -17,9 +17,32 @@ const OLD_TOKEN = "44444444-4444-4444-8444-444444444444";
 const NEW_TOKEN = "55555555-5555-4555-8555-555555555555";
 const SNAPSHOT_HASH = "d".repeat(64);
 
+// Mirrors the effective-ACL probe inside artifact-cleanup-grants.sql so the
+// test observes the same PUBLIC state the guard decides on.
+const PUBLIC_CREATE_SQL = `
+  SELECT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_namespace AS namespaces
+    CROSS JOIN LATERAL aclexplode(
+      COALESCE(namespaces.nspacl, acldefault('n', namespaces.nspowner))
+    ) AS schema_acl
+    WHERE namespaces.nspname = 'public'
+      AND schema_acl.grantee = 0
+      AND schema_acl.privilege_type = 'CREATE'
+  ) AS unsafe
+`;
+
+function readGrantScript(): Promise<string> {
+  return readFile(
+    new URL("../../../../deploy/postgres/artifact-cleanup-grants.sql", import.meta.url),
+    "utf8",
+  );
+}
+
 describeDatabase("artifact cleanup PostgreSQL least privilege", () => {
   let admin: Pool;
   let cleanup: Pool;
+  let grantScript: string;
 
   beforeAll(async () => {
     admin = new Pool({ connectionString: adminDatabaseUrl });
@@ -29,11 +52,8 @@ describeDatabase("artifact cleanup PostgreSQL least privilege", () => {
        LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
        PASSWORD '${CLEANUP_PASSWORD}'`,
     );
-    const grants = await readFile(
-      new URL("../../../../deploy/postgres/artifact-cleanup-grants.sql", import.meta.url),
-      "utf8",
-    );
-    await admin.query(grants);
+    grantScript = await readGrantScript();
+    await admin.query(grantScript);
 
     const cleanupUrl = new URL(adminDatabaseUrl!);
     cleanupUrl.username = CLEANUP_ROLE;
@@ -194,5 +214,33 @@ describeDatabase("artifact cleanup PostgreSQL least privilege", () => {
       [CLEANUP_ROLE],
     );
     expect(broad.rows).toEqual([]);
+  });
+
+  it("refuses installation when PUBLIC still holds CREATE on schema public", async () => {
+    // A PostgreSQL 15+ server that was upgraded from 14 keeps the historical
+    // public-schema ACL, so the server-version gate alone cannot close this.
+    // Reproduce that ACL deliberately and require the grant script to abort.
+    const safeBefore = await admin.query<{ unsafe: boolean }>(PUBLIC_CREATE_SQL);
+    expect(safeBefore.rows[0]!.unsafe).toBe(false);
+
+    await admin.query("GRANT CREATE ON SCHEMA public TO PUBLIC");
+    try {
+      const unsafe = await admin.query<{ unsafe: boolean }>(PUBLIC_CREATE_SQL);
+      expect(unsafe.rows[0]!.unsafe).toBe(true);
+
+      await expect(admin.query(grantScript)).rejects.toMatchObject({
+        code: "P0001",
+        message: expect.stringContaining(
+          "PUBLIC holds CREATE on schema public",
+        ),
+      });
+    } finally {
+      await admin.query("REVOKE CREATE ON SCHEMA public FROM PUBLIC");
+    }
+
+    const restored = await admin.query<{ unsafe: boolean }>(PUBLIC_CREATE_SQL);
+    expect(restored.rows[0]!.unsafe).toBe(false);
+    // The aborted installation must leave the reviewed grants untouched.
+    await expect(admin.query(grantScript)).resolves.toBeDefined();
   });
 });

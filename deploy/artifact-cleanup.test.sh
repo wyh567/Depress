@@ -82,6 +82,36 @@ grep -Fq 'artifact_deleted_at' "$grants"
 ! grep -Eq '^GRANT (ALL|CREATE|DELETE|INSERT|TRUNCATE)' "$grants"
 ! grep -Eq 'compile_outbox|"user"|projects|documents' "$grants"
 
+# Production prerequisites must be read from the connected server, must be
+# enforced before any grant, and must never mutate the global PUBLIC ACL.
+grep -Fq "current_setting('server_version_num')" "$grants"
+grep -Eq '< *150000' "$grants"
+grep -Fq 'PostgreSQL 15 or newer' "$grants"
+grep -Fq 'aclexplode' "$grants"
+grep -Eq 'grantee = 0' "$grants"
+grep -Fq "privilege_type = 'CREATE'" "$grants"
+grep -Fq "acldefault('n'" "$grants"
+grep -Fq 'PUBLIC holds CREATE on schema public' "$grants"
+! grep -Eqi '^[[:space:]]*(GRANT|REVOKE)[[:space:]].*[[:space:]](TO|FROM)[[:space:]]+PUBLIC\b' "$grants"
+# Both guards must precede the first privilege statement.
+grants_version_line="$(grep -n "current_setting('server_version_num')" "$grants" | head -1 | cut -d: -f1)"
+grants_public_line="$(grep -n 'PUBLIC holds CREATE on schema public' "$grants" | head -1 | cut -d: -f1)"
+grants_first_privilege_line="$(grep -nE '^[[:space:]]*(GRANT|REVOKE)[[:space:]]' "$grants" | head -1 | cut -d: -f1)"
+[[ -n "$grants_version_line" && -n "$grants_public_line" && -n "$grants_first_privilege_line" ]]
+(( grants_version_line < grants_first_privilege_line ))
+(( grants_public_line < grants_first_privilege_line ))
+# A failed prerequisite must roll back rather than leave a partial install.
+grep -Fxq 'BEGIN;' "$grants"
+grep -Fxq 'COMMIT;' "$grants"
+
+grep -Fq 'PostgreSQL **server 15 or newer**' "$readme"
+grep -Fq 'PostgreSQL 16 is the version the cleanup permission model' "$readme"
+grep -Fq 'compatibility does not imply that its default PostgreSQL package' "$readme"
+grep -Fq 'actual connected database server' "$readme"
+grep -Fq '`PUBLIC` must not hold `CREATE` on schema `public`' "$readme"
+grep -Fq 'production provisioning is blocked' "$readme"
+grep -Fq 'ON_ERROR_STOP=1' "$readme"
+
 grep -Fq '"artifacts:cleanup": "tsx src/artifact-cleanup-main.ts"' "$package_json"
 grep -Fq 'DeleteObject' "$readme"
 grep -Fq 'artifacts/*' "$readme"

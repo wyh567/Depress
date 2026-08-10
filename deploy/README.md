@@ -173,8 +173,19 @@ read-only and reports the OS, systemd, CPU, RAM, swap, disk, required command
 versions, and listener state. The units use directives supported by systemd 249: `StateDirectory`,
 `CacheDirectory`, `RuntimeDirectory`, `ProtectSystem`, `ProtectHome`,
 `ReadOnlyPaths`, and `ReadWritePaths`. Node 22, Corepack/pnpm 9, nginx,
-Docker Engine, PostgreSQL, Redis, `runuser`, GNU `tar`, `readlink`, `stat`,
-`ss`, and `systemd-analyze` are host prerequisites; no installer is included.
+Docker Engine, PostgreSQL **server 15 or newer**, Redis, `runuser`, GNU `tar`,
+`readlink`, `stat`, `ss`, and `systemd-analyze` are host prerequisites; no
+installer is included.
+
+`host-preflight.sh` gates the host on Ubuntu 22.04, but **Ubuntu 22.04
+compatibility does not imply that its default PostgreSQL package is an
+acceptable production version**. Ubuntu 22.04 ships PostgreSQL 14, and
+PostgreSQL 14 and older grant `CREATE` on schema `public` to `PUBLIC` by
+default — which would let `depress_cleanup` create objects regardless of its
+own least-privilege grants. The version that matters is the one reported by the
+**actual connected database server**, not the host OS, the `psql` client, or a
+container image tag. PostgreSQL 16 is the version the cleanup permission model
+is currently validated against.
 
 The resource gates use exact kernel values: at least 2 CPUs from `nproc`,
 `MemTotal >= 3407872 kB` from `/proc/meminfo`, at least 1610612736 bytes of
@@ -219,6 +230,33 @@ by the claim query, and updates of `artifact_cleanup_token`,
 `artifact_cleanup_started_at`, and `artifact_deleted_at`. It grants no row
 insert/delete, migration, auth-table, outbox, or unrelated-column access.
 
+Run the grant file with `ON_ERROR_STOP` so a refused prerequisite is also a
+nonzero exit:
+
+```bash
+psql -v ON_ERROR_STOP=1 -f deploy/postgres/artifact-cleanup-grants.sql
+```
+
+The whole installation is one transaction, and it verifies two production
+prerequisites against the connected server before granting anything. A refused
+prerequisite rolls back, so it can never leave a partially installed permission
+state:
+
+1. **PostgreSQL server 15 or newer**, read from the server's own
+   `server_version_num`. PostgreSQL 14 is refused.
+2. **`PUBLIC` must not hold `CREATE` on schema `public`.** The script reads the
+   effective schema ACL rather than inferring it from the version, because a
+   database upgraded to 15+ keeps its historical public-schema ACL. A
+   version-15+ server with an inherited `PUBLIC` `CREATE` grant is refused too.
+
+If either prerequisite fails, cleanup permissions are **not** installed and
+production provisioning is blocked until an operator resolves it. The script
+never changes the `PUBLIC` ACL itself: removing `CREATE` from `PUBLIC` is a
+database-wide privilege change, so an operator must first confirm which roles
+still require explicit `CREATE` on schema `public` — migration and application
+roles may rely on it — harden the schema deliberately as a database-security
+action, and only then rerun the installation.
+
 S3-compatible credentials remain separated by process:
 
 - API: read/sign existing private artifacts; no object deletion.
@@ -245,7 +283,10 @@ Production is not ready until an operator records confirmation of every gate:
 3. Limit cleanup S3 access to `DeleteObject` on `artifacts/*` only.
 4. Confirm the API identity remains read/sign only.
 5. Confirm the Pointer Worker identity remains write only.
-6. Create `depress_cleanup` and apply the reviewed minimum PostgreSQL grants.
+6. Provision the production database on PostgreSQL server 15 or newer with
+   `PUBLIC` holding no `CREATE` on schema `public`, then create
+   `depress_cleanup` and apply the reviewed minimum PostgreSQL grants. The
+   grant script refuses to install if either prerequisite is unmet.
 7. Install `/etc/depress/artifact-cleanup.env` as
    `root:depress-cleanup` mode `0640`.
 8. Create the non-login `depress-cleanup` system account and private group.
