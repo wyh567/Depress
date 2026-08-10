@@ -10,6 +10,11 @@ import {
   type CrossrefClient,
 } from "../services/crossref/crossref-client";
 import { crossrefWorkToCslItem } from "../services/crossref/crossref-work-to-csl";
+import {
+  DEFAULT_API_RATE_LIMIT_WINDOW_MS,
+  DEFAULT_DOI_RATE_LIMIT_MAX,
+  rateLimitError,
+} from "../http-safety";
 
 const ERROR_STATUS: Record<DoiLookupErrorCode, number> = {
   INVALID_DOI: 400,
@@ -30,6 +35,8 @@ export function registerReferencesDoiRoute(
     crossref?: CrossrefClient;
     mailto?: string;
     fetchFn?: typeof fetch;
+    rateLimitMax?: number;
+    rateLimitWindowMs?: number;
   } = {},
 ): void {
   const crossref =
@@ -39,7 +46,16 @@ export function registerReferencesDoiRoute(
       ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
     });
 
-  app.post("/references/doi/lookup", async (request, reply) => {
+  app.post("/references/doi/lookup", {
+    config: {
+      rateLimit: {
+        max: options.rateLimitMax ?? DEFAULT_DOI_RATE_LIMIT_MAX,
+        timeWindow:
+          options.rateLimitWindowMs ?? DEFAULT_API_RATE_LIMIT_WINDOW_MS,
+        errorResponseBuilder: () => rateLimitError("CROSSREF_RATE_LIMITED"),
+      },
+    },
+  }, async (request, reply) => {
     const parsed = DoiLookupRequestSchema.safeParse(request.body as unknown);
     if (!parsed.success) {
       const body = fail("INVALID_DOI");

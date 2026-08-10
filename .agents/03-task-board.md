@@ -18,7 +18,7 @@
 | T-01 | 整理工作树 + 让 CI 覆盖本分支 | [tasks/T-01-worktree-and-ci.md](tasks/T-01-worktree-and-ci.md) | `DONE` | 无 | 2026-08-07 |
 | T-02 | 移除遗留未认证编译入口与死代码 | [tasks/T-02-remove-legacy-compile-contract.md](tasks/T-02-remove-legacy-compile-contract.md) | `DONE` | T-01 | 2026-08-08 |
 | T-03 | 同步 process.md / architecture.md / ADR 0007 | [tasks/T-03-sync-docs-and-adr.md](tasks/T-03-sync-docs-and-adr.md) | `DONE` | T-02 | 2026-08-09 |
-| T-04 | P4-10 最小生产安全集 | [tasks/T-04-min-production-safety.md](tasks/T-04-min-production-safety.md) | `NOT_STARTED` | T-03 | 2026-08-04 |
+| T-04 | P4-10 最小生产安全集 | [tasks/T-04-min-production-safety.md](tasks/T-04-min-production-safety.md) | `IN_PROGRESS` | T-03 | 2026-08-09 |
 | T-05 | 自动保存 + mentor 人工验收收口 | [tasks/T-05-autosave-and-mentor-signoff.md](tasks/T-05-autosave-and-mentor-signoff.md) | `NOT_STARTED` | T-04 | 2026-08-04 |
 
 ## 2. 为什么是这个顺序
@@ -33,7 +33,7 @@
 
 T-02 → T-03 的顺序也有依赖：先删掉遗留契约，`process.md` 里 P4-09 才能诚实地标成完成。
 
-**下一任务：T-04（仍为 `NOT_STARTED`）。** T-03 已完成并经 PR #6 合并；已批准的治理决策是
+**当前任务：T-04（`IN_PROGRESS`）。** T-03 已完成；已批准的治理决策是
 single-VM full-stack Production MVP 与 invite-only Mentor MVP。T-05 的顺序与范围不变。
 
 T-04 之后才做 T-05，是因为即使是 invite-only 生产入口也必须先有最小限流/配额/清理控制，
@@ -54,6 +54,9 @@ T-04 之后才做 T-05，是因为即使是 invite-only 生产入口也必须先
 | 2026-08-04 | 三个模板均非官方认证模板，GB/T 仅抽样验证 | 投稿前需逐条比对期刊 guideline | 初次分析 |
 | 2026-08-04 | `apps/web/components/document-workspace.tsx` 264 行，超过 `.cursorrules` 的组件 ≤150 行约定 | 既有欠债，需拆分 | 初次分析 |
 | 2026-08-05 | `document-metadata.ts` 的 `parseAuthors` / `parseAffiliations` **返回类型**仍是手写的 author/affiliation 结构镜像（同属 Invariant #3 违规）。当前**能通过类型检查**（协变方向合法），故不在 T-01A 的最小修复范围内 | Invariant #3 双份维护；日后 ast 字段变更时会静默漂移 | T-01A |
+| 2026-08-09 | 在途 compile job 需要独立的 stale-job reconciliation | 否则异常终止的 active 状态可能长期占用后续配额 | T-04 决策审计（D19） |
+| 2026-08-09 | 生成 PDF 仍缺少硬字节上限 | 请求体上限不能限制渲染后 artifact 体积 | T-04 决策审计（D20） |
+| 2026-08-09 | 生产 nginx 未转发公开 `/references/doi/lookup` | Web/API 对该公开 DOI BFF 的生产可达性尚未闭环 | T-04-A 路由复核 |
 
 ## 4. 完成历史
 

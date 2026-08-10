@@ -11,6 +11,10 @@ import type { MentorAuth } from "../auth/auth";
 import { requireAuthenticatedUser } from "../auth/fastify-auth";
 import type { ArtifactUrlSigner } from "../services/artifact-contracts";
 import {
+  DEFAULT_API_RATE_LIMIT_WINDOW_MS,
+  DEFAULT_COMPILE_RATE_LIMIT_MAX,
+} from "../http-safety";
+import {
   CompileDocumentNotFoundError,
   CompileProjectionError,
   CompileRevisionConflictError,
@@ -24,10 +28,18 @@ export function registerCompileJobRoutes(
   auth: MentorAuth,
   pool: Pool,
   signArtifactUrl?: ArtifactUrlSigner,
+  rateLimit: { max: number; timeWindowMs: number } = {
+    max: DEFAULT_COMPILE_RATE_LIMIT_MAX,
+    timeWindowMs: DEFAULT_API_RATE_LIMIT_WINDOW_MS,
+  },
 ): void {
   const jobs = createCompileJobRepository(pool);
 
-  app.post("/api/compile-jobs", async (request, reply) => {
+  app.post("/api/compile-jobs", {
+    config: {
+      rateLimit: { max: rateLimit.max, timeWindow: rateLimit.timeWindowMs },
+    },
+  }, async (request, reply) => {
     const user = await requireAuthenticatedUser(auth, request, reply);
     if (!user) return;
     const body = CompileJobCreateRequestSchema.safeParse(request.body);
