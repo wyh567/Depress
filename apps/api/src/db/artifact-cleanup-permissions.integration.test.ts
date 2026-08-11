@@ -1,11 +1,21 @@
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { Pool } from "pg";
+import { Client, Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createArtifactCleanupRepository } from "./artifact-cleanup-repository";
 import { runMigrations } from "./migrate";
+import {
+  PERMISSION_TEST_FLAG,
+  requireDisposableApplicationDatabase,
+  requireDisposablePostgresTarget,
+} from "./test-support/disposable-postgres-target";
 
 const adminDatabaseUrl = process.env["DEPRESS_POSTGRES_ADMIN_TEST_URL"];
-const describeDatabase = adminDatabaseUrl ? describe : describe.skip;
+// This suite creates and drops the production-named depress_cleanup role, so it
+// runs only when both the target and the explicit permission-test opt-in are
+// present, and only after the disposable-target guard clears the server.
+const describeDatabase =
+  adminDatabaseUrl && process.env[PERMISSION_TEST_FLAG] === "1" ? describe : describe.skip;
 const CLEANUP_ROLE = "depress_cleanup";
 const CLEANUP_PASSWORD = "t04d-cleanup-role-test-password";
 const OWNER_ID = "artifact-cleanup-permission-owner";
@@ -40,51 +50,120 @@ function readGrantScript(): Promise<string> {
 }
 
 describeDatabase("artifact cleanup PostgreSQL least privilege", () => {
-  let admin: Pool;
-  let cleanup: Pool;
+  const databaseName = `depress_cleanup_perm_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
+  // Ownership state for teardown. Every flag here is set ONLY after the
+  // corresponding creation has actually succeeded, and afterAll consults only
+  // this state - never DROP ... IF EXISTS, and never a resource this suite did
+  // not itself observe being created. `maintenanceReady` gates the very first
+  // PostgreSQL connection teardown is allowed to make: if the disposable-target
+  // guard in beforeAll throws, maintenanceReady stays false and afterAll must
+  // perform zero PostgreSQL cleanup.
+  let maintenanceReady = false;
+  let maintenanceUrl: string;
+  let createdDatabase = false;
+  let createdCleanupRole = false;
+  // `admin` is the privileged pool against the disposable application database.
+  // The maintenance database from DEPRESS_POSTGRES_ADMIN_TEST_URL never receives
+  // migrations; it is used only through withMaintenanceClient for CREATE/DROP
+  // DATABASE and DROP ROLE.
+  let admin: Pool | undefined;
+  let cleanup: Pool | undefined;
   let grantScript: string;
 
+  async function withMaintenanceClient<T>(
+    run: (client: Client) => Promise<T>,
+  ): Promise<T> {
+    const client = new Client({ connectionString: maintenanceUrl });
+    await client.connect();
+    try {
+      return await run(client);
+    } finally {
+      await client.end();
+    }
+  }
+
+  // Test bodies only ever run after beforeAll has completed successfully, so
+  // pools are assigned by then. Accessors keep that invariant explicit; afterAll
+  // reads the raw optional variables directly.
+  function requireAdminPool(): Pool {
+    if (!admin) throw new Error("admin pool is not initialized");
+    return admin;
+  }
+
+  function requireCleanupPool(): Pool {
+    if (!cleanup) throw new Error("cleanup pool is not initialized");
+    return cleanup;
+  }
+
   beforeAll(async () => {
-    admin = new Pool({ connectionString: adminDatabaseUrl });
+    // Must precede every mutation, including CREATE DATABASE and CREATE ROLE.
+    // maintenanceReady/maintenanceUrl are only set AFTER this guard succeeds,
+    // so a thrown guard leaves afterAll with nothing it is permitted to clean
+    // up: it never opens a maintenance connection unless this line completed.
+    await requireDisposablePostgresTarget({ connectionString: adminDatabaseUrl! });
+    maintenanceUrl = adminDatabaseUrl!;
+    maintenanceReady = true;
+
+    await withMaintenanceClient(async (client) => {
+      await client.query(`CREATE DATABASE ${databaseName}`);
+    });
+    // Only recorded once CREATE DATABASE has actually returned successfully.
+    createdDatabase = true;
+
+    const applicationUrl = new URL(adminDatabaseUrl!);
+    applicationUrl.pathname = `/${databaseName}`;
+    // The freshly created database is a second target: validate its disposable
+    // identity and confirm it carries no application tables before migrating it.
+    await requireDisposableApplicationDatabase({
+      connectionString: applicationUrl.toString(),
+    });
+    admin = new Pool({ connectionString: applicationUrl.toString() });
     await runMigrations(admin);
+
     await admin.query(
-      `CREATE ROLE depress_cleanup
+      `CREATE ROLE ${CLEANUP_ROLE}
        LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
        PASSWORD '${CLEANUP_PASSWORD}'`,
     );
+    // Recorded only after this exact CREATE ROLE succeeds, so a failure here
+    // leaves createdCleanupRole false and afterAll must not DROP ROLE.
+    createdCleanupRole = true;
+
     grantScript = await readGrantScript();
     await admin.query(grantScript);
 
     const cleanupUrl = new URL(adminDatabaseUrl!);
     cleanupUrl.username = CLEANUP_ROLE;
     cleanupUrl.password = CLEANUP_PASSWORD;
+    cleanupUrl.pathname = `/${databaseName}`;
     cleanup = new Pool({ connectionString: cleanupUrl.toString(), max: 4 });
   });
 
   beforeEach(async () => {
-    await admin.query(
+    const adminPool = requireAdminPool();
+    await adminPool.query(
       `TRUNCATE compile_outbox, compile_jobs, documents, projects, "user"
        CASCADE`,
     );
-    await admin.query(
+    await adminPool.query(
       `INSERT INTO "user" (
          id, name, email, "emailVerified", "createdAt", "updatedAt"
        ) VALUES ($1, 'Cleanup Permission Owner', 'cleanup-permission@example.test',
          true, now(), now())`,
       [OWNER_ID],
     );
-    await admin.query(
+    await adminPool.query(
       `INSERT INTO projects (id, owner_user_id, name, is_default)
        VALUES ($1, $2, 'Cleanup Permission Project', true)`,
       [PROJECT_ID, OWNER_ID],
     );
-    await admin.query(
+    await adminPool.query(
       `INSERT INTO documents (
          id, project_id, envelope_json, revision, content_hash
        ) VALUES ($1, $2, '{"schemaVersion":1}'::jsonb, 1, $3)`,
       [DOCUMENT_ID, PROJECT_ID, SNAPSHOT_HASH],
     );
-    await admin.query(
+    await adminPool.query(
       `INSERT INTO compile_jobs (
          id, project_id, document_id, requested_revision, template_id, format,
          input_snapshot, snapshot_hash, status, artifact_key,
@@ -111,15 +190,31 @@ describeDatabase("artifact cleanup PostgreSQL least privilege", () => {
 
   afterAll(async () => {
     await cleanup?.end();
-    if (admin) {
-      await admin.query(`DROP OWNED BY depress_cleanup`);
-      await admin.query(`DROP ROLE depress_cleanup`);
-      await admin.end();
-    }
+    await admin?.end();
+
+    // No PostgreSQL cleanup is permitted unless the disposable-target guard
+    // actually succeeded: maintenanceReady is the single gate proving a
+    // guard-validated connection string exists. Without it, `maintenanceUrl`
+    // may be unset or unvalidated, so withMaintenanceClient must never run.
+    if (!maintenanceReady) return;
+
+    await withMaintenanceClient(async (client) => {
+      // Drop the disposable application database first so database-local ACLs
+      // and objects disappear before the cluster-global cleanup role is removed.
+      if (createdDatabase) {
+        await client.query(`DROP DATABASE ${databaseName} WITH (FORCE)`);
+      }
+      // Only drop the role this exact test run created - never a role that
+      // merely happens to exist, and never via IF EXISTS as a substitute for
+      // ownership tracking.
+      if (createdCleanupRole) {
+        await client.query(`DROP ROLE ${CLEANUP_ROLE}`);
+      }
+    });
   });
 
   it("runs claim, stale reclaim, and token-owned finalize with only lifecycle grants", async () => {
-    const repository = createArtifactCleanupRepository(cleanup, {
+    const repository = createArtifactCleanupRepository(requireCleanupPool(), {
       createClaimToken: () => NEW_TOKEN,
     });
 
@@ -134,7 +229,7 @@ describeDatabase("artifact cleanup PostgreSQL least privilege", () => {
       repository.finalizeArtifactDeletion(SECOND_ID, NEW_TOKEN),
     ).resolves.toBe(true);
 
-    const lifecycle = await admin.query<{
+    const lifecycle = await requireAdminPool().query<{
       id: string;
       artifact_deleted_at: Date;
       artifact_cleanup_token: string | null;
@@ -164,8 +259,9 @@ describeDatabase("artifact cleanup PostgreSQL least privilege", () => {
   });
 
   it("denies job creation/deletion, unrelated mutation/read, schema creation, auth, and outbox access", async () => {
+    const cleanupPool = requireCleanupPool();
     async function expectPermissionDenied(sql: string): Promise<void> {
-      await expect(cleanup.query(sql)).rejects.toMatchObject({ code: "42501" });
+      await expect(cleanupPool.query(sql)).rejects.toMatchObject({ code: "42501" });
     }
 
     await expectPermissionDenied("INSERT INTO compile_jobs DEFAULT VALUES");
@@ -182,7 +278,7 @@ describeDatabase("artifact cleanup PostgreSQL least privilege", () => {
       "CREATE TABLE public.cleanup_forbidden (id integer)",
     );
 
-    const columns = await admin.query<{
+    const columns = await requireAdminPool().query<{
       privilege_type: string;
       column_name: string;
     }>(
@@ -207,7 +303,7 @@ describeDatabase("artifact cleanup PostgreSQL least privilege", () => {
       { privilege_type: "UPDATE", column_name: "artifact_cleanup_token" },
       { privilege_type: "UPDATE", column_name: "artifact_deleted_at" },
     ]);
-    const broad = await admin.query(
+    const broad = await requireAdminPool().query(
       `SELECT privilege_type
        FROM information_schema.table_privileges
        WHERE table_schema = 'public' AND grantee = $1`,
@@ -220,27 +316,28 @@ describeDatabase("artifact cleanup PostgreSQL least privilege", () => {
     // A PostgreSQL 15+ server that was upgraded from 14 keeps the historical
     // public-schema ACL, so the server-version gate alone cannot close this.
     // Reproduce that ACL deliberately and require the grant script to abort.
-    const safeBefore = await admin.query<{ unsafe: boolean }>(PUBLIC_CREATE_SQL);
+    const adminPool = requireAdminPool();
+    const safeBefore = await adminPool.query<{ unsafe: boolean }>(PUBLIC_CREATE_SQL);
     expect(safeBefore.rows[0]!.unsafe).toBe(false);
 
-    await admin.query("GRANT CREATE ON SCHEMA public TO PUBLIC");
+    await adminPool.query("GRANT CREATE ON SCHEMA public TO PUBLIC");
     try {
-      const unsafe = await admin.query<{ unsafe: boolean }>(PUBLIC_CREATE_SQL);
+      const unsafe = await adminPool.query<{ unsafe: boolean }>(PUBLIC_CREATE_SQL);
       expect(unsafe.rows[0]!.unsafe).toBe(true);
 
-      await expect(admin.query(grantScript)).rejects.toMatchObject({
+      await expect(adminPool.query(grantScript)).rejects.toMatchObject({
         code: "P0001",
         message: expect.stringContaining(
           "PUBLIC holds CREATE on schema public",
         ),
       });
     } finally {
-      await admin.query("REVOKE CREATE ON SCHEMA public FROM PUBLIC");
+      await adminPool.query("REVOKE CREATE ON SCHEMA public FROM PUBLIC");
     }
 
-    const restored = await admin.query<{ unsafe: boolean }>(PUBLIC_CREATE_SQL);
+    const restored = await adminPool.query<{ unsafe: boolean }>(PUBLIC_CREATE_SQL);
     expect(restored.rows[0]!.unsafe).toBe(false);
     // The aborted installation must leave the reviewed grants untouched.
-    await expect(admin.query(grantScript)).resolves.toBeDefined();
+    await expect(adminPool.query(grantScript)).resolves.toBeDefined();
   });
 });
