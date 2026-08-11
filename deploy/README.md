@@ -62,6 +62,19 @@ belong to `docker`. The Web identity has no database,
 Redis, S3, Auth, migration, or Docker credentials and reads only
 `/etc/depress/web.env`.
 
+Linux/systemd identities and PostgreSQL login roles are separate objects. Each
+backend process `DATABASE_URL` must authenticate as the matching PostgreSQL
+role below; Web has no PostgreSQL credential:
+
+| Linux / systemd identity | Environment file | PostgreSQL role in `DATABASE_URL` |
+| --- | --- | --- |
+| `depress-web` | `/etc/depress/web.env` | none |
+| `depress-api` | `/etc/depress/api.env` | `depress_api` |
+| `depress-outbox` | `/etc/depress/outbox.env` | `depress_outbox` |
+| `depress-worker` | `/etc/depress/pointer-worker.env` | `depress_pointer_worker` |
+| `depress-migration` | `/etc/depress/migration.env` | `depress_migration` |
+| `depress-cleanup` | `/etc/depress/artifact-cleanup.env` | `depress_cleanup` |
+
 ```bash
 sudo test ! -L /etc/depress
 sudo install -d -o root -g root -m 0711 /etc/depress
@@ -181,11 +194,12 @@ installer is included.
 compatibility does not imply that its default PostgreSQL package is an
 acceptable production version**. Ubuntu 22.04 ships PostgreSQL 14, and
 PostgreSQL 14 and older grant `CREATE` on schema `public` to `PUBLIC` by
-default — which would let `depress_cleanup` create objects regardless of its
-own least-privilege grants. The version that matters is the one reported by the
+default — which would let every runtime and cleanup role create objects
+regardless of its own least-privilege grants. The version that matters is the
+one reported by the
 **actual connected database server**, not the host OS, the `psql` client, or a
-container image tag. PostgreSQL 16 is the version the cleanup permission model
-is currently validated against.
+container image tag. PostgreSQL 16 is the version the runtime and cleanup
+permission models are currently validated against.
 
 The resource gates use exact kernel values: at least 2 CPUs from `nproc`,
 `MemTotal >= 3407872 kB` from `/proc/meminfo`, at least 1610612736 bytes of
@@ -206,6 +220,83 @@ Docker layers, and journals. External S3-compatible artifact storage and its
 object data are not part of the VM resource budget. Set bounded journald
 retention and an explicit release-retention policy during host operations; this
 package does not delete operator-owned releases automatically.
+
+## Runtime PostgreSQL least-privilege contract
+
+The canonical privilege contract for the three application runtime database
+roles is `deploy/postgres/runtime-role-grants.sql`. It governs only:
+
+- `depress_api` — Fastify API and Better Auth paths
+- `depress_outbox` — compile outbox publisher
+- `depress_pointer_worker` — persisted compile pointer worker
+
+`depress_cleanup` is **not** governed by that file. It remains governed
+exclusively by `deploy/postgres/artifact-cleanup-grants.sql`. The two
+installations are independent: the runtime installer never grants, revokes, or
+reads privileges for `depress_cleanup`.
+
+Create the three runtime roles as dedicated `LOGIN` roles with no privileged
+attributes and no role memberships, set passwords outside the repository, and
+install the reviewed grants while connected to the production application
+database as its owner (or another administrative connection with equivalent
+authority). Run with `ON_ERROR_STOP` so a refused prerequisite is also a
+nonzero exit:
+
+```bash
+psql -v ON_ERROR_STOP=1 -f deploy/postgres/runtime-role-grants.sql
+```
+
+The whole installation is one transaction. Prerequisites are checked against
+the connected server before any privilege is granted. A refused prerequisite
+rolls back, so it can never leave a partially installed permission state. The
+installer is fail-closed: if a prerequisite fails, stop production
+provisioning; do not bypass the script.
+
+Confirmed prerequisites from the committed SQL:
+
+1. **PostgreSQL server 15 or newer**, from the server's own
+   `server_version_num`. PostgreSQL 14 is refused and is not an application
+   fallback. PostgreSQL 16 is the validated version.
+2. **`PUBLIC` must not effectively hold `CREATE` on schema `public`.**
+3. **`PUBLIC` must not retain database-level `CONNECT` or `TEMPORARY`** on the
+   connected production application database.
+4. Each of `depress_api`, `depress_outbox`, and `depress_pointer_worker` must
+   already exist as a `LOGIN` role without superuser, createdb, createrole,
+   replication, or bypass-RLS attributes.
+5. Those runtime roles must hold no role memberships.
+6. Those runtime roles must not own relations in schema `public`, must not own
+   the current database, and must not own schema `public`.
+7. Reviewed migrations `0001`–`0006` must already be applied, and the live
+   tables must match the reviewed column shapes. The script grants no sequence
+   privileges; unreviewed sequences fail closed.
+
+### Operator responsibility for `PUBLIC` (required target state)
+
+`runtime-role-grants.sql` **checks** the `PUBLIC` states above and **does not
+mutate** them. Removing `CREATE` on schema `public` from `PUBLIC`, and removing
+`CONNECT` / `TEMPORARY` on the production application database from `PUBLIC`,
+are deliberate database-wide operator provisioning actions performed **before**
+installing the runtime grants. This repository documents the required target
+state; it does not invent unreviewed remediation SQL here. After hardening
+`PUBLIC`, grant `CONNECT` explicitly to each approved DePress login role that
+must attach to the production database, then rerun the installer.
+
+### Database privilege installation order
+
+Operator-controlled production order for schema and privilege transitions:
+
+1. Stop runtime database consumers before the schema/permission transition.
+2. Apply application migrations using the migration identity /
+   database-owner-capable migration path (`depress_migration` /
+   `/etc/depress/migration.env`).
+3. Apply `deploy/postgres/runtime-role-grants.sql` with an administrative /
+   database-owner connection capable of installing the reviewed grants.
+4. Apply `deploy/postgres/artifact-cleanup-grants.sql` for the separate
+   `depress_cleanup` role.
+5. Validate that the grant installers completed successfully and that the
+   production prerequisites remain satisfied.
+6. Start runtime services only after migrations and both grant installers have
+   succeeded.
 
 ## Artifact cleanup production contract
 
@@ -284,9 +375,12 @@ Production is not ready until an operator records confirmation of every gate:
 4. Confirm the API identity remains read/sign only.
 5. Confirm the Pointer Worker identity remains write only.
 6. Provision the production database on PostgreSQL server 15 or newer with
-   `PUBLIC` holding no `CREATE` on schema `public`, then create
-   `depress_cleanup` and apply the reviewed minimum PostgreSQL grants. The
-   grant script refuses to install if either prerequisite is unmet.
+   `PUBLIC` holding no `CREATE` on schema `public` and no database-level
+   `CONNECT` or `TEMPORARY`, create the reviewed DePress login roles, apply
+   reviewed migrations, then successfully install
+   `deploy/postgres/runtime-role-grants.sql` and
+   `deploy/postgres/artifact-cleanup-grants.sql`. Each grant script refuses to
+   install if its prerequisites are unmet and does not mutate `PUBLIC`.
 7. Install `/etc/depress/artifact-cleanup.env` as
    `root:depress-cleanup` mode `0640`.
 8. Create the non-login `depress-cleanup` system account and private group.
