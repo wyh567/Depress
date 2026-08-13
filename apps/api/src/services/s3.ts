@@ -3,6 +3,7 @@ import {
   GetObjectCommand,
   PutObjectCommand,
   S3Client,
+  type S3ClientConfig,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { z } from "zod";
@@ -18,6 +19,10 @@ const S3EnvSchema = z.object({
   S3_SECRET_ACCESS_KEY: z.string().min(1),
   // Optional: S3-compatible endpoints (MinIO, R2) for local dev.
   S3_ENDPOINT: z.string().url().optional(),
+  S3_FORCE_PATH_STYLE: z
+    .enum(["true", "false", "1", "0"])
+    .transform((value) => value === "true" || value === "1")
+    .optional(),
 });
 export type S3Env = z.infer<typeof S3EnvSchema>;
 
@@ -50,17 +55,24 @@ export interface S3ArtifactCleanupService {
   close(): void;
 }
 
+export function buildS3ClientConfig(env: S3Env): S3ClientConfig {
+  return {
+    region: env.S3_REGION,
+    credentials: {
+      accessKeyId: env.S3_ACCESS_KEY_ID,
+      secretAccessKey: env.S3_SECRET_ACCESS_KEY,
+    },
+    ...(env.S3_ENDPOINT
+      ? {
+          endpoint: env.S3_ENDPOINT,
+          forcePathStyle: env.S3_FORCE_PATH_STYLE ?? true,
+        }
+      : {}),
+  };
+}
+
 function createConfiguredS3Client(): S3Client {
-  return new S3Client({
-      region: env.S3_REGION,
-      credentials: {
-        accessKeyId: env.S3_ACCESS_KEY_ID,
-        secretAccessKey: env.S3_SECRET_ACCESS_KEY,
-      },
-      ...(env.S3_ENDPOINT
-        ? { endpoint: env.S3_ENDPOINT, forcePathStyle: true }
-        : {}),
-    });
+  return new S3Client(buildS3ClientConfig(env));
 }
 
 // Client and presigner are injectable so tests never touch AWS.

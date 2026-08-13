@@ -6,9 +6,11 @@ const validEnv = {
   S3_ACCESS_KEY_ID: "AKIATEST",
   S3_SECRET_ACCESS_KEY: "secret",
 };
+const optionalEnvKeys = ["S3_ENDPOINT", "S3_FORCE_PATH_STYLE"];
 
 function stubEnv(env: Record<string, string>) {
   for (const key of Object.keys(validEnv)) vi.stubEnv(key, "");
+  for (const key of optionalEnvKeys) vi.stubEnv(key, undefined);
   for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
 }
 
@@ -47,6 +49,84 @@ describe("s3 module init (fail-fast env validation)", () => {
 });
 
 describe("parseS3Env", () => {
+  it("defaults custom endpoints to path-style addressing", async () => {
+    stubEnv(validEnv);
+    const { buildS3ClientConfig, parseS3Env } = await importS3();
+    const parsed = parseS3Env({
+      ...validEnv,
+      S3_ENDPOINT: "http://localhost:9000",
+    });
+
+    expect(buildS3ClientConfig(parsed)).toMatchObject({
+      endpoint: "http://localhost:9000",
+      forcePathStyle: true,
+    });
+  });
+
+  it.each([
+    ["true", true],
+    ["1", true],
+    ["false", false],
+    ["0", false],
+  ])(
+    "maps S3_FORCE_PATH_STYLE=%s to %s",
+    async (setting, expected) => {
+      stubEnv(validEnv);
+      const { buildS3ClientConfig, parseS3Env } = await importS3();
+      const parsed = parseS3Env({
+        ...validEnv,
+        S3_ENDPOINT: "https://s3.example.com",
+        S3_FORCE_PATH_STYLE: setting,
+      });
+
+      expect(buildS3ClientConfig(parsed).forcePathStyle).toBe(expected);
+    },
+  );
+
+  it.each(["yes", "no", "abc", "2"])(
+    "rejects invalid S3_FORCE_PATH_STYLE=%s",
+    async (setting) => {
+      stubEnv(validEnv);
+      const { parseS3Env } = await importS3();
+
+      expect(() =>
+        parseS3Env({
+          ...validEnv,
+          S3_ENDPOINT: "https://s3.example.com",
+          S3_FORCE_PATH_STYLE: setting,
+        }),
+      ).toThrow(/S3_FORCE_PATH_STYLE/);
+    },
+  );
+
+  it("configures a custom endpoint for virtual-hosted-style addressing", async () => {
+    stubEnv(validEnv);
+    const { buildS3ClientConfig, parseS3Env } = await importS3();
+    const parsed = parseS3Env({
+      ...validEnv,
+      S3_ENDPOINT: "https://s3.example.com",
+      S3_FORCE_PATH_STYLE: "false",
+    });
+
+    expect(buildS3ClientConfig(parsed)).toMatchObject({
+      endpoint: "https://s3.example.com",
+      forcePathStyle: false,
+    });
+  });
+
+  it("leaves AWS SDK addressing behavior unset without a custom endpoint", async () => {
+    stubEnv(validEnv);
+    const { buildS3ClientConfig, parseS3Env } = await importS3();
+    const parsed = parseS3Env({
+      ...validEnv,
+      S3_FORCE_PATH_STYLE: "false",
+    });
+    const config = buildS3ClientConfig(parsed);
+
+    expect(config).not.toHaveProperty("endpoint");
+    expect(config).not.toHaveProperty("forcePathStyle");
+  });
+
   it("rejects a malformed optional endpoint", async () => {
     stubEnv(validEnv);
     const { parseS3Env } = await importS3();
