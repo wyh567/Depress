@@ -1,6 +1,17 @@
 import { EventEmitter } from "node:events";
 import { existsSync, writeFileSync } from "node:fs";
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import {
+  chmod,
+  chown,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -26,18 +37,24 @@ import {
 const CID = "a".repeat(64);
 const RUN_ID = "00000000-0000-4000-8000-000000000001";
 const TEST_RUNTIME_IDENTITY = { uid: 124, gid: 125 } as const;
+const TEST_BUNDLED_FONT_GID = 126;
 
 type SandboxRunnerOptions = NonNullable<Parameters<typeof createProductionTypstSandboxRunner>[0]>;
 
 function createTypstSandboxRunner(options: SandboxRunnerOptions = {}) {
   return createProductionTypstSandboxRunner({
     resolveRuntimeIdentity: () => TEST_RUNTIME_IDENTITY,
+    resolveFontMountGroupIds: async () => [TEST_BUNDLED_FONT_GID],
     ...options,
   });
 }
 
 function argValue(args: readonly string[], name: string): string {
   return args[args.indexOf(name) + 1] ?? "";
+}
+
+function argValues(args: readonly string[], name: string): string[] {
+  return args.filter((_value, index) => args[index - 1] === name);
 }
 
 function workDirFromArgs(args: readonly string[]): string {
@@ -116,6 +133,7 @@ describe("buildTypstDockerArgs", () => {
     runId: RUN_ID,
     cidFile: "/tmp/job-1/container.cid",
     runtimeIdentity: TEST_RUNTIME_IDENTITY,
+    supplementaryGroupIds: [TEST_BUNDLED_FONT_GID],
   });
 
   it("preserves all sandbox hardening and resource limits", () => {
@@ -186,9 +204,37 @@ describe("buildTypstDockerArgs", () => {
 
   it("maps the Worker identity before mounts and the immutable image", () => {
     expect(argValue(args, "--user")).toBe("124:125");
+    expect(argValues(args, "--group-add")).toEqual(["126"]);
     expect(args.indexOf("--user")).toBeLessThan(args.indexOf("-v"));
+    expect(args.indexOf("--group-add")).toBeLessThan(args.indexOf("-v"));
     expect(args.indexOf("--user")).toBeLessThan(args.indexOf(DEFAULT_TYPST_IMAGE));
   });
+
+  it("deduplicates explicit font mount groups and retains a primary-GID match", () => {
+    const groupedArgs = buildTypstDockerArgs({
+      workDir: "/tmp/job-1",
+      runId: RUN_ID,
+      cidFile: "/tmp/job-1/container.cid",
+      runtimeIdentity: TEST_RUNTIME_IDENTITY,
+      supplementaryGroupIds: [125, 994, 125, 994],
+    });
+    expect(argValues(groupedArgs, "--group-add")).toEqual(["125", "994"]);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects an invalid supplementary font group: %s",
+    (groupId) => {
+      expect(() =>
+        buildTypstDockerArgs({
+          workDir: "/tmp/job-1",
+          runId: RUN_ID,
+          cidFile: "/tmp/job-1/container.cid",
+          runtimeIdentity: TEST_RUNTIME_IDENTITY,
+          supplementaryGroupIds: [groupId],
+        })
+      ).toThrow("Sandbox font group resolution failed");
+    }
+  );
 
   it("omits the user mapping for Windows-compatible no-identity behavior", () => {
     const windowsArgs = buildTypstDockerArgs({
@@ -284,7 +330,9 @@ describe("Docker container identity", () => {
     expect(dockerIdentity).not.toBe(documentIdentity);
   });
 
-  it("omits --user when the internal resolver reports Windows-compatible no identity", async () => {
+  it("derives only bundled and configured mount groups and deduplicates them", async () => {
+    const configuredFontDirectory = "/srv/operator-approved-fonts";
+    const resolveFontMountGroupIds = vi.fn(async () => [994, 995, 994]);
     let argsSeen: readonly string[] = [];
     const { spawnProcess } = spawnHarness(async ({ args, child }) => {
       argsSeen = args;
@@ -293,9 +341,87 @@ describe("Docker container identity", () => {
     });
     await createTypstSandboxRunner({
       spawnProcess,
+      fontDirectory: configuredFontDirectory,
+      resolveFontMountGroupIds,
+    }).compile({ main: "--group-add 777 /untrusted/host/fonts" });
+
+    expect(resolveFontMountGroupIds).toHaveBeenCalledWith([
+      TYPST_FONT_DIRECTORY,
+      configuredFontDirectory,
+    ]);
+    expect(argValues(argsSeen, "--group-add")).toEqual(["994", "995"]);
+    expect(argsSeen).not.toContain("777");
+    expect(argsSeen.join(" ")).not.toContain("/untrusted/host/fonts");
+  });
+
+  it("does not propagate unrelated host supplementary groups", async () => {
+    const dockerGroupGid = 999;
+    const getgroups = vi.fn(() => [125, 994, dockerGroupGid]);
+    const originalGetgroups = process.getgroups;
+    Object.defineProperty(process, "getgroups", { configurable: true, value: getgroups });
+    try {
+      let argsSeen: readonly string[] = [];
+      const { spawnProcess } = spawnHarness(async ({ args, child }) => {
+        argsSeen = args;
+        await writeDockerOutputs(args);
+        child.close(0);
+      });
+      await createTypstSandboxRunner({
+        spawnProcess,
+        resolveFontMountGroupIds: async () => [994],
+      }).compile({ main: "x" });
+      expect(getgroups).not.toHaveBeenCalled();
+      expect(argValues(argsSeen, "--group-add")).toEqual(["994"]);
+      expect(argsSeen).not.toContain(String(dockerGroupGid));
+    } finally {
+      Object.defineProperty(process, "getgroups", {
+        configurable: true,
+        value: originalGetgroups,
+      });
+    }
+  });
+
+  it("fails closed before run setup when font mount metadata cannot be resolved", async () => {
+    let runIdCalls = 0;
+    let runDirectoryCalls = 0;
+    const { spawnProcess, calls } = spawnHarness(() => undefined);
+    await expect(
+      createTypstSandboxRunner({
+        spawnProcess,
+        resolveFontMountGroupIds: async () => {
+          throw new Error("sensitive filesystem detail");
+        },
+        createRunId: () => {
+          runIdCalls += 1;
+          return RUN_ID;
+        },
+        createRunDirectory: async () => {
+          runDirectoryCalls += 1;
+          return join(tmpdir(), "must-not-be-created");
+        },
+      }).compile({ main: "x" })
+    ).rejects.toThrow("Sandbox font group resolution failed");
+    expect(runIdCalls).toBe(0);
+    expect(runDirectoryCalls).toBe(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("omits --user when the internal resolver reports Windows-compatible no identity", async () => {
+    let argsSeen: readonly string[] = [];
+    const resolveFontMountGroupIds = vi.fn(async () => [994]);
+    const { spawnProcess } = spawnHarness(async ({ args, child }) => {
+      argsSeen = args;
+      await writeDockerOutputs(args);
+      child.close(0);
+    });
+    await createTypstSandboxRunner({
+      spawnProcess,
       resolveRuntimeIdentity: () => undefined,
+      resolveFontMountGroupIds,
     }).compile({ main: "x" });
     expect(argsSeen).not.toContain("--user");
+    expect(argsSeen).not.toContain("--group-add");
+    expect(resolveFontMountGroupIds).not.toHaveBeenCalled();
   });
 
   it("keeps the host CID file inside the unique run directory but outside the writable mount", async () => {
@@ -702,7 +828,132 @@ describe("createTypstSandboxRunner lifecycle", () => {
 
 // Optional real-Docker smoke test — opt in with DEPRESS_DOCKER_SMOKE=1.
 // Requires the already-approved pinned image. Default tests never run Docker.
-describe.skipIf(process.env["DEPRESS_DOCKER_SMOKE"] !== "1")("typst sandbox (docker smoke)", () => {
+const skipDockerSmoke =
+  process.env["DEPRESS_DOCKER_SMOKE"] !== "1" ||
+  process.platform !== "linux" ||
+  typeof process.getuid !== "function" ||
+  process.getuid() !== 0;
+
+describe.skipIf(skipDockerSmoke)("typst sandbox (docker smoke)", () => {
+  it("uses only the font mount group to read and embed a production-shaped CJK font", async () => {
+    const fixtureRoot = await mkdtemp(join(tmpdir(), "depress-font-permissions-"));
+    const fontDirectory = join(fixtureRoot, "fonts");
+    const workDirectory = join(fixtureRoot, "work");
+    const fontFile = join(fontDirectory, "NotoSansCJKsc-Regular.otf");
+    const sourceFile = join(workDirectory, SANDBOX_INPUT_FILE);
+    const outputFile = join(workDirectory, SANDBOX_OUTPUT_FILE);
+    const runtimeId = 65_534;
+    const fontGroupId = 54_321;
+    const chineseText = [
+      "\u4e2d\u6587\u5b57\u4f53\u6d4b\u8bd5",
+      "\u8fd9\u662f\u4e2d\u6587\u6458\u8981",
+      "\u4f60\u597d\uff0c\u4e16\u754c",
+    ];
+
+    try {
+      await mkdir(fontDirectory);
+      await mkdir(workDirectory);
+      await copyFile(join(TYPST_FONT_DIRECTORY, "NotoSansCJKsc-Regular.otf"), fontFile);
+      await writeFile(
+        sourceFile,
+        `#set text(font: "Noto Sans CJK SC")\n${chineseText.join("\n")}`,
+        "utf8"
+      );
+      await chown(fontDirectory, 0, fontGroupId);
+      await chown(fontFile, 0, fontGroupId);
+      await chmod(fontDirectory, 0o750);
+      await chmod(fontFile, 0o640);
+      await chown(workDirectory, runtimeId, runtimeId);
+      await chown(sourceFile, runtimeId, runtimeId);
+
+      const dockerPrefix = [
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--user",
+        `${runtimeId}:${runtimeId}`,
+      ];
+      const mountsAndImage = [
+        "-v",
+        `${fontDirectory}:/fonts/bundled:ro`,
+        "-v",
+        `${workDirectory}:/work`,
+        "-w",
+        "/work",
+        "--entrypoint",
+        "typst",
+        DEFAULT_TYPST_IMAGE,
+      ];
+      const fontListCommand = [
+        "fonts",
+        "--ignore-system-fonts",
+        "--font-path",
+        "/fonts/bundled",
+      ];
+      const withoutGroup = spawnSync(
+        "docker",
+        [...dockerPrefix, ...mountsAndImage, ...fontListCommand],
+        { encoding: "utf8", shell: false }
+      );
+      expect(withoutGroup.stdout).not.toContain("Noto Sans CJK SC");
+
+      const withGroupPrefix = [...dockerPrefix, "--group-add", String(fontGroupId)];
+      const withGroup = spawnSync(
+        "docker",
+        [...withGroupPrefix, ...mountsAndImage, ...fontListCommand],
+        { encoding: "utf8", shell: false }
+      );
+      expect(withGroup.status).toBe(0);
+      expect(withGroup.stdout).toContain("Noto Sans CJK SC");
+
+      const compile = spawnSync(
+        "docker",
+        [
+          ...withGroupPrefix,
+          ...mountsAndImage,
+          "compile",
+          "--ignore-system-fonts",
+          "--font-path",
+          "/fonts/bundled",
+          SANDBOX_INPUT_FILE,
+          SANDBOX_OUTPUT_FILE,
+        ],
+        { encoding: "utf8", shell: false }
+      );
+      expect(compile.status, compile.stderr).toBe(0);
+      const pdf = await readFile(outputFile);
+      expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+
+      const pdfFonts = spawnSync("pdffonts", [outputFile], { encoding: "utf8", shell: false });
+      if (!pdfFonts.error) {
+        expect(pdfFonts.status).toBe(0);
+        expect(pdfFonts.stdout).toMatch(/NotoSansCJKsc/i);
+      } else {
+        expect((pdfFonts.error as NodeJS.ErrnoException).code).toBe("ENOENT");
+        expect(pdf.toString("latin1")).toContain("NotoSansCJKsc-Regular");
+      }
+
+      const pdfText = spawnSync("pdftotext", [outputFile, "-"], {
+        encoding: "utf8",
+        shell: false,
+      });
+      if (!pdfText.error) {
+        expect(pdfText.status).toBe(0);
+        for (const text of chineseText) expect(pdfText.stdout).toContain(text);
+      } else {
+        expect((pdfText.error as NodeJS.ErrnoException).code).toBe("ENOENT");
+      }
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("compiles a trivial document to a real PDF", async () => {
     const sandbox = createProductionTypstSandboxRunner();
     const pdf = await sandbox.compile({ main: "Hello from DePress." });
