@@ -17,7 +17,8 @@ import { PINNED_TYPST_IMAGE } from "../env";
 export const DEFAULT_TYPST_IMAGE = PINNED_TYPST_IMAGE;
 
 // Immutable bundled fallback for CJK semantic content. This code-owned asset
-// is mounted read-only; compile input cannot select a host path or font.
+// is always mounted read-only; an operator-configured directory may add fonts
+// but can never replace this fallback. Compile input cannot select either path.
 export const TYPST_FONT_DIRECTORY = join(
   dirname(fileURLToPath(import.meta.url)),
   "../../assets/fonts"
@@ -135,15 +136,18 @@ export function buildTypstDockerArgs(options: {
     "-v",
     `${options.workDir}:/work`,
     "-v",
-    `${options.fontDirectory ?? TYPST_FONT_DIRECTORY}:/fonts:ro`,
+    `${TYPST_FONT_DIRECTORY}:/fonts/bundled:ro`,
+    ...(options.fontDirectory ? ["-v", `${options.fontDirectory}:/fonts/configured:ro`] : []),
     "-w",
     "/work",
     "--entrypoint",
     "typst",
     options.image ?? DEFAULT_TYPST_IMAGE,
     "compile",
+    "--ignore-system-fonts",
     "--font-path",
-    "/fonts",
+    "/fonts/bundled",
+    ...(options.fontDirectory ? ["--font-path", "/fonts/configured"] : []),
     SANDBOX_INPUT_FILE,
     SANDBOX_OUTPUT_FILE,
   ];

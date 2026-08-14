@@ -82,9 +82,14 @@ export function CompileControls({
   activeRevision,
   ...props
 }: CompileControlsProps) {
+  const [selectedTemplateId, setSelectedTemplateId] =
+    useState<CompileTemplateId>("ieee");
+
   return (
     <CompileControlsForRevision
       key={`${activeDocumentId ?? "none"}:${activeRevision ?? "none"}`}
+      selectedTemplateId={selectedTemplateId}
+      setSelectedTemplateId={setSelectedTemplateId}
       {...(activeDocumentId === undefined ? {} : { activeDocumentId })}
       {...(activeRevision === undefined ? {} : { activeRevision })}
       {...props}
@@ -92,16 +97,21 @@ export function CompileControls({
   );
 }
 
+interface CompileControlsForRevisionProps extends CompileControlsProps {
+  selectedTemplateId: CompileTemplateId;
+  setSelectedTemplateId: (templateId: CompileTemplateId) => void;
+}
+
 function CompileControlsForRevision({
   activeDocumentId,
   activeRevision,
   saveState,
+  selectedTemplateId,
+  setSelectedTemplateId,
   client = compileJobClient,
   sleep = abortableSleep,
   openDownload = (url) => window.location.assign(url),
-}: CompileControlsProps) {
-  const [selectedTemplateId, setSelectedTemplateId] =
-    useState<CompileTemplateId>("ieee");
+}: CompileControlsForRevisionProps) {
   const [activeCompileJobId, setActiveCompileJobId] = useState<string>();
   const [compileStatus, setCompileStatus] =
     useState<PersistedCompileJobStatus>();
@@ -113,21 +123,24 @@ function CompileControlsForRevision({
   const activeRequest = useRef<ActiveRequest>({ generation: 0 });
   const submissionLocked = useRef(false);
 
-  const invalidate = useCallback((clear: boolean) => {
-    generation.current += 1;
-    controller.current?.abort();
-    controller.current = undefined;
-    activeRequest.current = { generation: generation.current };
-    submissionLocked.current = false;
-    if (clear) {
-      setSelectedTemplateId("ieee");
-      setActiveCompileJobId(undefined);
-      setCompileStatus(undefined);
-      setCompileError(undefined);
-      setSubmitting(false);
-      setPolling(false);
-    }
-  }, []);
+  const invalidate = useCallback(
+    (clear: boolean) => {
+      generation.current += 1;
+      controller.current?.abort();
+      controller.current = undefined;
+      activeRequest.current = { generation: generation.current };
+      submissionLocked.current = false;
+      if (clear) {
+        setSelectedTemplateId("ieee");
+        setActiveCompileJobId(undefined);
+        setCompileStatus(undefined);
+        setCompileError(undefined);
+        setSubmitting(false);
+        setPolling(false);
+      }
+    },
+    [setSelectedTemplateId],
+  );
 
   useEffect(() => {
     const onLogout = () => invalidate(true);
