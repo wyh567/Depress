@@ -98,7 +98,9 @@ describe("persisted compile controls", () => {
       { label: "Elsevier", value: "elsevier" },
       { label: "GB/T 7714", value: "gbt7714" },
     ]);
-    expect(screen.getByText("Save the document before compiling")).toBeVisible();
+    expect(
+      screen.getByText("Save the document before compiling"),
+    ).toBeVisible();
     expect(screen.getByRole("button", { name: "Compile" })).toBeDisabled();
 
     view.rerender(
@@ -123,14 +125,12 @@ describe("persisted compile controls", () => {
   });
 
   it("never calls legacy /compile from the authenticated compile flow", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(
-        new Response(JSON.stringify(job("succeeded")), {
-          status: 202,
-          headers: { "Content-Type": "application/json" },
-        }),
-      );
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify(job("succeeded")), {
+        status: 202,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     render(
       <CompileControls
@@ -255,7 +255,94 @@ describe("persisted compile controls", () => {
     ).toBe("elsevier");
   });
 
-  it("ignores an old poll after a document switch and clears old download UI", async () => {
+  it("preserves the selected template while clearing revision-bound compile state", async () => {
+    const createCompileJob = vi
+      .fn()
+      .mockResolvedValueOnce(job("succeeded", { templateId: "gbt7714" }))
+      .mockResolvedValueOnce(
+        job("succeeded", { revision: 8, templateId: "gbt7714" }),
+      );
+    const client = clientWith({ createCompileJob });
+    const view = render(
+      <CompileControls
+        activeDocumentId={DOCUMENT_A}
+        activeRevision={7}
+        saveState="saved"
+        client={client}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("PDF template"), {
+      target: { value: "gbt7714" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Compile" }));
+    await flush();
+    expect(screen.getByText("Compile status: succeeded")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Download PDF" })).toBeVisible();
+
+    view.rerender(
+      <CompileControls
+        activeDocumentId={DOCUMENT_A}
+        activeRevision={8}
+        saveState="saved"
+        client={client}
+      />,
+    );
+    expect(screen.getByLabelText("PDF template")).toHaveValue("gbt7714");
+    expect(screen.queryByText(/Compile status:/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Download PDF" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Compile" }));
+    await flush();
+    expect(createCompileJob).toHaveBeenLastCalledWith(
+      {
+        documentId: DOCUMENT_A,
+        revision: 8,
+        templateId: "gbt7714",
+        format: "pdf",
+      },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("aborts polling and ignores its response after a revision change", async () => {
+    const oldPoll = deferred<PersistedCompileJobResource>();
+    let oldSignal: AbortSignal | undefined;
+    const client = clientWith({
+      getCompileJob: vi.fn((_jobId: string, signal?: AbortSignal) => {
+        oldSignal = signal;
+        return oldPoll.promise;
+      }),
+    });
+    const view = render(
+      <CompileControls
+        activeDocumentId={DOCUMENT_A}
+        activeRevision={7}
+        saveState="saved"
+        client={client}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Compile" }));
+    await flush();
+    await act(() => vi.advanceTimersByTimeAsync(750));
+
+    view.rerender(
+      <CompileControls
+        activeDocumentId={DOCUMENT_A}
+        activeRevision={8}
+        saveState="saved"
+        client={client}
+      />,
+    );
+    expect(oldSignal?.aborted).toBe(true);
+    await act(async () => {
+      oldPoll.resolve(job("succeeded"));
+      await oldPoll.promise;
+    });
+    expect(screen.queryByText(/Compile status:/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Download PDF" })).toBeNull();
+  });
+
+  it("retains the recent template but clears an old poll after a document switch", async () => {
     const oldPoll = deferred<PersistedCompileJobResource>();
     const client = clientWith({
       getCompileJob: vi.fn(() => oldPoll.promise),
@@ -268,6 +355,9 @@ describe("persisted compile controls", () => {
         client={client}
       />,
     );
+    fireEvent.change(screen.getByLabelText("PDF template"), {
+      target: { value: "elsevier" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Compile" }));
     await flush();
     await act(() => vi.advanceTimersByTimeAsync(750));
@@ -285,6 +375,7 @@ describe("persisted compile controls", () => {
       await oldPoll.promise;
     });
 
+    expect(screen.getByLabelText("PDF template")).toHaveValue("elsevier");
     expect(screen.queryByText(/Compile status:/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Download PDF" })).toBeNull();
   });
@@ -351,12 +442,16 @@ describe("persisted compile controls", () => {
         client={client}
       />,
     );
+    fireEvent.change(screen.getByLabelText("PDF template"), {
+      target: { value: "gbt7714" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Compile" }));
     await flush();
     await act(() => vi.advanceTimersByTimeAsync(750));
     window.dispatchEvent(new Event(COMPILE_POLLING_INVALIDATE_EVENT));
     await flush();
     expect(requests[0]?.aborted).toBe(true);
+    expect(screen.getByLabelText("PDF template")).toHaveValue("ieee");
     expect(screen.queryByText(/Compile status:/)).toBeNull();
     first.unmount();
 

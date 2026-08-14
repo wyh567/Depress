@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderIeeeTypstProject } from "@depress/transformers";
+import { renderGbt7714TypstProject, renderIeeeTypstProject } from "@depress/transformers";
 import {
   DEFAULT_TYPST_IMAGE,
   SANDBOX_BIBLIOGRAPHY_FILE,
@@ -142,14 +142,43 @@ describe("buildTypstDockerArgs", () => {
     expect(args).toContain(DEFAULT_TYPST_IMAGE);
   });
 
-  it("keeps fixed mounts, entrypoint, font path, and filenames", () => {
+  it("always mounts the bundled font and ignores system fonts", () => {
     expect(argValue(args, "-v")).toBe("/tmp/job-1:/work");
-    expect(args[args.lastIndexOf("-v") + 1]).toBe(`${TYPST_FONT_DIRECTORY}:/fonts:ro`);
+    expect(args[args.lastIndexOf("-v") + 1]).toBe(`${TYPST_FONT_DIRECTORY}:/fonts/bundled:ro`);
     expect(argValue(args, "--entrypoint")).toBe("typst");
-    expect(args.slice(-5)).toEqual([
+    expect(args.slice(-6)).toEqual([
       "compile",
+      "--ignore-system-fonts",
       "--font-path",
-      "/fonts",
+      "/fonts/bundled",
+      SANDBOX_INPUT_FILE,
+      SANDBOX_OUTPUT_FILE,
+    ]);
+  });
+
+  it("adds an operator font directory without replacing the bundled fallback", () => {
+    const configuredArgs = buildTypstDockerArgs({
+      workDir: "/tmp/job-1",
+      runId: RUN_ID,
+      cidFile: "/tmp/job-1/container.cid",
+      runtimeIdentity: TEST_RUNTIME_IDENTITY,
+      fontDirectory: "/srv/depress-fonts",
+    });
+    const mounts = configuredArgs
+      .map((value, index) => (configuredArgs[index - 1] === "-v" ? value : null))
+      .filter((value): value is string => value !== null);
+    expect(mounts).toEqual([
+      "/tmp/job-1:/work",
+      `${TYPST_FONT_DIRECTORY}:/fonts/bundled:ro`,
+      "/srv/depress-fonts:/fonts/configured:ro",
+    ]);
+    expect(configuredArgs.slice(-8)).toEqual([
+      "compile",
+      "--ignore-system-fonts",
+      "--font-path",
+      "/fonts/bundled",
+      "--font-path",
+      "/fonts/configured",
       SANDBOX_INPUT_FILE,
       SANDBOX_OUTPUT_FILE,
     ]);
@@ -234,7 +263,9 @@ describe("Docker container identity", () => {
       await writeDockerOutputs(args);
       child.close(0);
     });
-    await createTypstSandboxRunner({ spawnProcess }).compile({ main: secretText });
+    await createTypstSandboxRunner({ spawnProcess }).compile({
+      main: secretText,
+    });
     expect(labels.join(" ")).not.toContain(secretText);
   });
 
@@ -246,7 +277,9 @@ describe("Docker container identity", () => {
       await writeDockerOutputs(args);
       child.close(0);
     });
-    await createTypstSandboxRunner({ spawnProcess }).compile({ main: documentIdentity });
+    await createTypstSandboxRunner({ spawnProcess }).compile({
+      main: documentIdentity,
+    });
     expect(dockerIdentity).toBe("124:125");
     expect(dockerIdentity).not.toBe(documentIdentity);
   });
@@ -659,7 +692,9 @@ describe("createTypstSandboxRunner lifecycle", () => {
     });
     await expect(
       createTypstSandboxRunner({ spawnProcess }).compile({ main: "x" })
-    ).rejects.toMatchObject({ details: { reason: "docker-spawn", cleanup: "succeeded" } });
+    ).rejects.toMatchObject({
+      details: { reason: "docker-spawn", cleanup: "succeeded" },
+    });
     expect(calls).toHaveLength(2);
     expect(calls[1]?.args).toEqual(["rm", "--force", CID]);
   });
@@ -726,5 +761,27 @@ describe.skipIf(process.env["DEPRESS_DOCKER_SMOKE"] !== "1")("typst sandbox (doc
     });
     const pdf = await createProductionTypstSandboxRunner().compile(project);
     expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+  }, 120_000);
+
+  it("embeds the bundled CJK font in a GB/T Chinese PDF", async () => {
+    const project = renderGbt7714TypstProject({
+      ast: {
+        type: "doc",
+        metadata: {
+          title: "中文字体测试",
+          abstract: "这是中文摘要",
+        },
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "你好，世界" }],
+          },
+        ],
+      },
+      references: [],
+    });
+    const pdf = await createProductionTypstSandboxRunner().compile(project);
+    expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(pdf.toString("latin1")).toContain("NotoSansCJKsc-Regular");
   }, 120_000);
 });
