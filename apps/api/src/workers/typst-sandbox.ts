@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -62,8 +62,10 @@ type SandboxRuntimeIdentity = {
 };
 
 type ResolveSandboxRuntimeIdentity = () => SandboxRuntimeIdentity | undefined;
+type ResolveFontMountGroupIds = (fontDirectories: readonly string[]) => Promise<readonly number[]>;
 
 const INVALID_RUNTIME_IDENTITY_MESSAGE = "Sandbox runtime identity resolution failed";
+const INVALID_FONT_GROUP_MESSAGE = "Sandbox font group resolution failed";
 
 function validateSandboxRuntimeIdentity(identity: SandboxRuntimeIdentity): SandboxRuntimeIdentity {
   if (
@@ -96,6 +98,39 @@ function resolveSandboxRuntimeIdentity(
   }
 }
 
+function normalizeFontMountGroupIds(groupIds: readonly number[]): number[] {
+  const normalized = new Set<number>();
+  for (const groupId of groupIds) {
+    if (!Number.isSafeInteger(groupId) || groupId <= 0) {
+      throw new Error(INVALID_FONT_GROUP_MESSAGE);
+    }
+    normalized.add(groupId);
+  }
+  return [...normalized];
+}
+
+async function resolveFilesystemFontMountGroupIds(
+  fontDirectories: readonly string[]
+): Promise<readonly number[]> {
+  try {
+    const metadata = await Promise.all(fontDirectories.map((fontDirectory) => stat(fontDirectory)));
+    return normalizeFontMountGroupIds(metadata.map(({ gid }) => gid));
+  } catch {
+    throw new Error(INVALID_FONT_GROUP_MESSAGE);
+  }
+}
+
+async function resolveFontMountGroupIds(
+  resolver: ResolveFontMountGroupIds,
+  fontDirectories: readonly string[]
+): Promise<readonly number[]> {
+  try {
+    return normalizeFontMountGroupIds(await resolver(fontDirectories));
+  } catch {
+    throw new Error(INVALID_FONT_GROUP_MESSAGE);
+  }
+}
+
 // Pure argument builder. runId and cidFile are generated inside the sandbox
 // runner and are never accepted from compile/HTTP input.
 export function buildTypstDockerArgs(options: {
@@ -103,9 +138,13 @@ export function buildTypstDockerArgs(options: {
   runId: string;
   cidFile: string;
   runtimeIdentity?: SandboxRuntimeIdentity;
+  supplementaryGroupIds?: readonly number[];
   image?: string;
   fontDirectory?: string;
 }): string[] {
+  const supplementaryGroupIds = normalizeFontMountGroupIds(
+    options.supplementaryGroupIds ?? []
+  );
   return [
     "run",
     "--rm",
@@ -133,6 +172,9 @@ export function buildTypstDockerArgs(options: {
     ...(options.runtimeIdentity
       ? ["--user", `${options.runtimeIdentity.uid}:${options.runtimeIdentity.gid}`]
       : []),
+    // Keep the mount GID explicit even when it numerically matches the primary
+    // GID: the production probe establishes that --group-add is required.
+    ...supplementaryGroupIds.flatMap((groupId) => ["--group-add", String(groupId)]),
     "-v",
     `${options.workDir}:/work`,
     "-v",
@@ -458,6 +500,7 @@ export function createTypstSandboxRunner(
     createRunId?: () => string;
     createRunDirectory?: () => Promise<string>;
     resolveRuntimeIdentity?: ResolveSandboxRuntimeIdentity;
+    resolveFontMountGroupIds?: ResolveFontMountGroupIds;
     image?: string;
     fontDirectory?: string;
     timings?: Partial<SandboxTimings>;
@@ -469,6 +512,8 @@ export function createTypstSandboxRunner(
     options.createRunDirectory ?? (() => mkdtemp(join(tmpdir(), "depress-typst-")));
   const resolveRuntimeIdentity =
     options.resolveRuntimeIdentity ?? resolveProcessSandboxRuntimeIdentity;
+  const resolveMountGroupIds =
+    options.resolveFontMountGroupIds ?? resolveFilesystemFontMountGroupIds;
   const timings: SandboxTimings = {
     executionTimeoutMs: SANDBOX_LIMITS.timeoutMs,
     termGraceMs: SANDBOX_LIMITS.termGraceMs,
@@ -485,6 +530,14 @@ export function createTypstSandboxRunner(
   return {
     async compile(project) {
       const runtimeIdentity = resolveSandboxRuntimeIdentity(resolveRuntimeIdentity);
+      const fontDirectories = [
+        TYPST_FONT_DIRECTORY,
+        ...(options.fontDirectory ? [options.fontDirectory] : []),
+      ];
+      const supplementaryGroupIds =
+        runtimeIdentity === undefined
+          ? []
+          : await resolveFontMountGroupIds(resolveMountGroupIds, fontDirectories);
       const runId = createRunId();
       const runDir = await createRunDirectory();
       const workDir = join(runDir, "work");
@@ -506,6 +559,7 @@ export function createTypstSandboxRunner(
             ...(options.image ? { image: options.image } : {}),
             ...(options.fontDirectory ? { fontDirectory: options.fontDirectory } : {}),
             ...(runtimeIdentity === undefined ? {} : { runtimeIdentity }),
+            ...(supplementaryGroupIds.length === 0 ? {} : { supplementaryGroupIds }),
           }),
           {
             timeoutMs: timings.executionTimeoutMs,
