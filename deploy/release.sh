@@ -183,7 +183,34 @@ run_release_health_check() {
     echo "health check is missing or not executable: ${HEALTH_CHECK_BIN}" >&2
     return 1
   }
-  "${HEALTH_CHECK_BIN}"
+
+  # Bounded readiness retry: the restarted services are Type=simple, so
+  # `systemctl restart` returning does not prove the application is
+  # actually listening yet (observed: Next.js took ~1.4s to report
+  # "Ready" after restart). A single immediate health check races that
+  # startup window and can trigger an unnecessary rollback on a release
+  # that is, in fact, healthy a moment later. Retry a bounded, small,
+  # deterministic number of times with a fixed interval; the same
+  # health-check.sh remains the sole authority on "healthy" — this loop
+  # only decides how long to keep asking it before giving up.
+  local max_attempts=${HEALTH_CHECK_MAX_ATTEMPTS:-10}
+  local retry_interval=${HEALTH_CHECK_RETRY_INTERVAL_SECONDS:-1}
+  local attempt=1
+  while true; do
+    if "${HEALTH_CHECK_BIN}"; then
+      if [[ "${attempt}" -gt 1 ]]; then
+        echo "release health check succeeded on attempt ${attempt}/${max_attempts}" >&2
+      fi
+      return 0
+    fi
+    if [[ "${attempt}" -ge "${max_attempts}" ]]; then
+      echo "release health check failed after ${attempt}/${max_attempts} attempts" >&2
+      return 1
+    fi
+    echo "release health check attempt ${attempt}/${max_attempts} failed; retrying in ${retry_interval}s" >&2
+    sleep "${retry_interval}"
+    attempt=$((attempt + 1))
+  done
 }
 
 ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}.new"

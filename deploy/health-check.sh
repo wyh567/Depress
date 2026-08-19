@@ -9,19 +9,29 @@ DEPRESS_ROOT=${DEPRESS_ROOT:-/opt/depress}
 HEALTH_SKIP_RELEASE_STATE=${HEALTH_SKIP_RELEASE_STATE:-0}
 HEALTH_SKIP_BAD_HOST=${HEALTH_SKIP_BAD_HOST:-0}
 
-CURL_ARGS=(
+# Transport/TLS args only — deliberately carries no Host header, so any
+# request that needs a *different* Host (the bad-host check below) never
+# risks inheriting the normal vhost's header alongside it. Sending both
+# `Host: de-press.xyz` and `Host: depress-internal.invalid` on the same
+# request let the first one win on the wire in production, silently
+# testing the normal vhost instead of the unknown-host rejection path.
+CURL_BASE_ARGS=(
   --silent
   --show-error
   --connect-timeout 3
   --max-time 10
+)
+if [[ "${HEALTH_INSECURE:-0}" == "1" ]]; then
+  CURL_BASE_ARGS+=(--insecure)
+elif [[ -n "${HEALTH_CA_FILE:-}" ]]; then
+  CURL_BASE_ARGS+=(--cacert "${HEALTH_CA_FILE}")
+fi
+
+CURL_ARGS=(
+  "${CURL_BASE_ARGS[@]}"
   --header "Host: ${HEALTH_HOST_HEADER}"
   --header "Accept: application/json"
 )
-if [[ "${HEALTH_INSECURE:-0}" == "1" ]]; then
-  CURL_ARGS+=(--insecure)
-elif [[ -n "${HEALTH_CA_FILE:-}" ]]; then
-  CURL_ARGS+=(--cacert "${HEALTH_CA_FILE}")
-fi
 
 TMP_DIR=$(mktemp -d)
 cleanup() {
@@ -73,7 +83,9 @@ legacy_status=$(status_for /compile)
 assert_status legacy-compile-hidden 404 "${legacy_status}"
 
 if [[ "${HEALTH_SKIP_BAD_HOST}" != "1" ]]; then
-  bad_host_status=$(curl "${CURL_ARGS[@]}" --header 'Host: depress-internal.invalid' \
+  # Deliberately CURL_BASE_ARGS, not CURL_ARGS: this must be the ONLY Host
+  # header on this request. See the CURL_BASE_ARGS comment above.
+  bad_host_status=$(curl "${CURL_BASE_ARGS[@]}" --header 'Host: depress-internal.invalid' \
     -o /dev/null -w '%{http_code}' "${HEALTH_ORIGIN}/")
   [[ "${bad_host_status}" == "000" || "${bad_host_status}" =~ ^4[0-9][0-9]$ ]] || {
     echo "health check failed: unknown host status=${bad_host_status}" >&2
