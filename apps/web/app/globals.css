@@ -25,25 +25,63 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* 编辑 UI 的屏显样式,只作用于呈现层;导出数据不含任何样式(Invariant #1)。 */
+/* 编辑 UI 的屏显样式,只作用于呈现层;导出数据不含任何样式(Invariant #1)。
+   Broadsheet manuscript type scale (T-06 Slice 4) — font-family is set by
+   the canvas wrapper (editor-area.tsx), scoped to just the manuscript;
+   these rules are size/weight/rhythm only. */
 .prose-depress h1 {
-  font-size: 1.5rem;
-  font-weight: 700;
-  margin: 1rem 0 0.5rem;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.012em;
+  color: var(--color-neutral-900);
+  margin: 1.4em 0 0.5em;
 }
 .prose-depress h2 {
-  font-size: 1.25rem;
+  position: relative;
+  font-size: 23px;
   font-weight: 600;
-  margin: 0.875rem 0 0.5rem;
+  line-height: 1.3;
+  color: var(--color-neutral-900);
+  margin: 1.4em 0 0.5em;
 }
 .prose-depress h3 {
-  font-size: 1.1rem;
+  font-size: 18px;
   font-weight: 600;
-  margin: 0.75rem 0 0.5rem;
+  line-height: 1.35;
+  color: var(--color-neutral-900);
+  margin: 1.2em 0 0.4em;
 }
 .prose-depress p {
-  margin: 0.5rem 0;
-  line-height: 1.75;
+  margin: 0.6em 0;
+  font-size: 16.5px;
+  line-height: 1.62;
+  color: var(--color-text);
+}
+
+/* CMYK section numeral (T-06 Slice 4) — decorative only, derived purely
+   from real heading order via a CSS counter (no schema/data change, no
+   fabricated numbering). Restrained: a dominant charcoal numeral with a
+   barely-offset, low-opacity misregistration via text-shadow — same
+   restrained print-registration language as the Login identity panel,
+   simpler here (no layered DOM copies needed since text-shadow supports
+   independent per-layer alpha). Reset once per manuscript. */
+.prose-depress {
+  counter-reset: manuscript-section;
+}
+.prose-depress h2::before {
+  counter-increment: manuscript-section;
+  content: counter(manuscript-section, decimal-leading-zero);
+  display: block;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+  text-shadow:
+    0.6px -0.6px 0 color-mix(in srgb, var(--color-accent) 35%, transparent),
+    -0.6px 0.4px 0 color-mix(in srgb, var(--color-accent-2) 30%, transparent),
+    0 0.6px 0 color-mix(in srgb, var(--color-process-yellow, #edbb00) 28%, transparent);
+  margin-bottom: 2px;
 }
 
 /* Citation chip:视图层派生的 [@citeKey],数据里只有 key。 */
@@ -51,15 +89,118 @@ body {
   display: inline-block;
   margin: 0 0.125rem;
   padding: 0 0.375rem;
-  border-radius: 0.25rem;
-  background: #e8f0fe;
-  color: #1a56db;
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-100);
+  color: var(--color-accent-700);
   font-size: 0.875em;
   cursor: default;
   user-select: none;
 }
 .citation-chip.citation-unknown {
-  background: #fdf2f2;
-  color: #c81e1e;
-  border: 1px dashed #f8b4b4;
+  background: var(--color-accent-2-100);
+  color: var(--color-accent-2-700);
+  border: 1px dashed var(--color-accent-2-300);
+}
+
+/* =========================================================================
+ * Broadsheet design tokens (T-06 Slice 1)
+ * =========================================================================
+ * Values translated from the approved Claude Design export
+ * (D:\depress-ui-handoff\claude-design\_ds\broadsheet-*\styles.css /
+ * readme.md / theme.json) into hand-maintained production tokens — this is
+ * NOT a copy of that stylesheet. No component in the live application binds
+ * to these tokens yet; nothing below changes any rendered pixel until a
+ * later, separately-approved slice wires a screen to them.
+ *
+ * Font status: FONT_ASSET_SOURCE_REQUIRED. No Source Serif 4 binary exists
+ * in this repository or in any already-approved dependency, and per owner
+ * instruction this slice does not fetch one from Google Fonts, unpkg, or
+ * any other external source, and does not substitute a different font
+ * silently. --font-heading / --font-body therefore resolve to a serif
+ * system-font fallback stack only. Once an approved local Source Serif 4
+ * asset is available, wire it through next/font/local in lib/fonts.ts and
+ * update these two variables in one isolated, reviewable change — do not
+ * fold that in with unrelated token work.
+ * ========================================================================= */
+:root {
+  /* Ground */
+  --color-bg: #f3f2f2;
+  --color-surface: #eae9e9;
+  --color-text: #201e1d;
+
+  /* Accents — cyan is the only interaction accent (focus, selection,
+     citation, active state); magenta is the rarer second spot (error /
+     missing-reference states). Never both in one small component. */
+  --color-accent: #0088b0;
+  --color-accent-2: #d6006c;
+  --color-divider: color-mix(in srgb, #201e1d 16%, transparent);
+
+  /* Tonal ramps — 100 (lightest) .. 900 (darkest), one shared lightness
+     scale per role. Use 100–300 for tinted fills/hovers/borders, 500 as
+     the role's base, 700–900 for text-on-tint and pressed states. */
+  --color-neutral-100: #f8f4f4;
+  --color-neutral-200: #eae7e7;
+  --color-neutral-300: #d7d3d3;
+  --color-neutral-400: #bab6b6;
+  --color-neutral-500: #9b9797;
+  --color-neutral-600: #7d7979;
+  --color-neutral-700: #605d5d;
+  --color-neutral-800: #444141;
+  --color-neutral-900: #2d2b2b;
+
+  --color-accent-100: #e9f8ff;
+  --color-accent-200: #cbeeff;
+  --color-accent-300: #99e0ff;
+  --color-accent-400: #62c5ee;
+  --color-accent-500: #38a6cf;
+  --color-accent-600: #1186ac;
+  --color-accent-700: #006786;
+  --color-accent-800: #004961;
+  --color-accent-900: #0a303e;
+
+  --color-accent-2-100: #fff1f4;
+  --color-accent-2-200: #ffdee6;
+  --color-accent-2-300: #ffc0d0;
+  --color-accent-2-400: #ff90b1;
+  --color-accent-2-500: #ff458e;
+  --color-accent-2-600: #d82071;
+  --color-accent-2-700: #aa0b56;
+  --color-accent-2-800: #790e3d;
+  --color-accent-2-900: #4b1528;
+
+  /* Type — see font status note above. No @font-face here: that belongs
+     with the eventual next/font/local wiring, not a bare token block. */
+  --font-heading: ui-serif, Georgia, "Times New Roman", serif;
+  --font-heading-weight: 600;
+  --font-body: ui-serif, Georgia, "Times New Roman", serif;
+
+  /* Interface type scale (px, translated from the design's spec sheet) */
+  --text-paper-title: 35px;
+  --text-section-heading: 23px;
+  --text-body: 16.5px;
+  --text-interface-label: 13.5px;
+  --text-overline: 10px;
+
+  /* Spacing — density 1.25x, do not tighten */
+  --space-1: 5px;
+  --space-2: 10px;
+  --space-3: 15px;
+  --space-4: 20px;
+  --space-6: 30px;
+  --space-8: 40px;
+
+  --radius-sm: 1px;
+  --radius-md: 2px;
+  --radius-lg: 4px;
+
+  /* Elevation — no elevation below dialog level */
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #2d2b2b 14%, transparent);
+  --shadow-md: 0 3px 10px color-mix(in srgb, #2d2b2b 16%, transparent);
+  --shadow-lg: 0 12px 32px color-mix(in srgb, #2d2b2b 22%, transparent);
+
+  /* Fixed layout constants shared by every screen in the design */
+  --layout-topbar-height: 56px;
+  --layout-sidebar-width: 232px;
+  --layout-inspector-width: 296px;
+  --layout-inspector-width-wide: 312px;
 }

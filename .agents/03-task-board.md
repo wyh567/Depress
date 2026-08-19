@@ -18,7 +18,8 @@
 | T-01 | 整理工作树 + 让 CI 覆盖本分支 | [tasks/T-01-worktree-and-ci.md](tasks/T-01-worktree-and-ci.md) | `DONE` | 无 | 2026-08-07 |
 | T-02 | 移除遗留未认证编译入口与死代码 | [tasks/T-02-remove-legacy-compile-contract.md](tasks/T-02-remove-legacy-compile-contract.md) | `DONE` | T-01 | 2026-08-08 |
 | T-03 | 同步 process.md / architecture.md / ADR 0007 | [tasks/T-03-sync-docs-and-adr.md](tasks/T-03-sync-docs-and-adr.md) | `DONE` | T-02 | 2026-08-09 |
-| T-04 | P4-10 最小生产安全集 | [tasks/T-04-min-production-safety.md](tasks/T-04-min-production-safety.md) | `IN_PROGRESS` | T-03 | 2026-08-09 |
+| T-04 | P4-10 最小生产安全集 | [tasks/T-04-min-production-safety.md](tasks/T-04-min-production-safety.md) | `PAUSED — owner reprioritized to Production UI implementation` | T-03 | 2026-08-17 |
+| T-06 | Production UI implementation（Claude Design 视觉对齐，功能零回归） | [tasks/T-06-production-ui-implementation.md](tasks/T-06-production-ui-implementation.md) | `DONE` | Owner reprioritization; T-04 temporarily paused | 2026-08-18 |
 | T-05 | 自动保存 + mentor 人工验收收口 | [tasks/T-05-autosave-and-mentor-signoff.md](tasks/T-05-autosave-and-mentor-signoff.md) | `NOT_STARTED` | T-04 | 2026-08-04 |
 
 ## 2. 为什么是这个顺序
@@ -37,7 +38,17 @@ T-02 → T-03 的顺序也有依赖：先删掉遗留契约，`process.md` 里 P
 single-VM full-stack Production MVP 与 invite-only Mentor MVP。T-05 的顺序与范围不变。
 
 T-04 之后才做 T-05，是因为即使是 invite-only 生产入口也必须先有最小限流/配额/清理控制，
-而自动保存 + 人工验收是“给人用”的收口动作。T-04 不开启公共注册。
+而自动保存 + 人工验收是”给人用”的收口动作。T-04 不开启公共注册。
+
+**2026-08-17 owner 决策：T-04 暂停，T-06（Production UI implementation）为当前唯一活跃任务。**
+Owner reprioritization; T-04 temporarily paused. T-04 未完成的安全控制项不放弃，只是延后；
+T-04 与 T-06 不同时活跃 —— T-06 完成或阶段性完成后由 owner 决定是否恢复 T-04，
+届时 T-05 仍在 T-04 之后、顺序不变。T-06 遵循已批准的 Phase 0（只读检查）与 Phase 1
+（分片实施计划）两份报告划定的范围与红线：不新增路由、不虚构 Dashboard/Editor/References/
+PDF 数据、不改 PDF 基础设施（OSS CORS / 同源代理）、保留全部三个编译模板（ieee / elsevier /
+gbt7714）、不做 autosave、不做 i18n、不移除 BibTeX 导入、不移除 metadata authoring、
+不新增编译快捷键、所有既有可访问性名称（aria-label / 可见文本断言）保持不变。
+详见任务文件 [tasks/T-06-production-ui-implementation.md](tasks/T-06-production-ui-implementation.md)。
 
 ## 3. 发现待办（做任务时发现、但明确不在当前 scope 的问题）
 
@@ -67,3 +78,4 @@ T-04 之后才做 T-05，是因为即使是 invite-only 生产入口也必须先
 | 2026-08-07 | T-01（CI 缺口补齐） | 原验收标准第 7 条（CI `push` 覆盖 `feature/**`）在最终审查阶段单独处理：`push.branches` 新增 `"feature/**"`，`pull_request.branches` 不变；lint/typecheck 通过。T-01 全部原验收标准现在真正闭合 |
 | 2026-08-08 | T-02 | 用户选定 Option A：完全移除未认证 `POST /compile` / `GET /jobs/:id`、legacy 全 payload Queue/reader/worker/processor 适配层、五个 Phase 3 smoke 与未挂载 Web 死路径；保留并验证 authenticated snapshot/outbox/pointer-worker/S3/sandbox 链路。lint/typecheck/build 通过，404 与目标路径定向测试通过，全量 405 passed / 46 skipped |
 | 2026-08-09 | T-03 | 治理与架构同步经 PR #6 合并到 master `d3fc0790794f272786a3eea196f5975c2b96360e`，post-merge CI `SUCCESS`；T-03 完成，T-04 保持 `NOT_STARTED` 并成为下一任务 |
+| 2026-08-18 | T-06 | Production UI implementation（Slice 1 – 9A，共 15 个已批准分片）完成。Final Product Acceptance（Slice 9/9A）PASS：466 passed / 107 skipped，lint/typecheck/build 全部 PASS，accessibility PASS，1440×1024 与 1280×900 视觉验收 PASS，无 backend/API/schema/infra 改动，无 Claude Design 运行时产物被打包。分支 `feature/t06-ui-design-tokens` 已确认 READY_FOR_PR，PR 待创建。T-04 未完成安全控制项仍待 owner 决定是否恢复。 |
