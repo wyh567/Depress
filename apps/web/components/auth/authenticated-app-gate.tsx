@@ -3,6 +3,10 @@
 import { useRouter } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
 import { COMPILE_POLLING_INVALIDATE_EVENT } from "@/components/editor/compile-controls";
+import { ActiveDocumentProvider } from "@/components/shell/active-document-context";
+import { ActiveViewProvider } from "@/components/shell/active-view";
+import { AppFrame } from "@/components/shell/app-frame";
+import { TopBar } from "@/components/shell/top-bar";
 import { authClient } from "@/lib/auth-client";
 import { useReferenceLibrary } from "@/stores/reference-library";
 
@@ -40,14 +44,20 @@ export function AuthenticatedAppGate({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen flex-col">
-      <header className="flex items-center justify-end gap-3 border-b px-4 py-2 text-sm">
-        <span>{session.data.user.name}</span>
-        <button type="button" onClick={signOut} disabled={signingOut}>
-          {signingOut ? "Signing out…" : "Sign out"}
-        </button>
-      </header>
-      <div className="min-h-0 flex-1">{children}</div>
-    </div>
+    <ActiveViewProvider>
+      <ActiveDocumentProvider>
+        <AppFrame
+          topBar={
+            <TopBar
+              userName={session.data.user.name}
+              signingOut={signingOut}
+              onSignOut={() => void signOut()}
+            />
+          }
+        >
+          {children}
+        </AppFrame>
+      </ActiveDocumentProvider>
+    </ActiveViewProvider>
   );
 }

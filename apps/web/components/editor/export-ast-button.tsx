@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { useDocumentMetadata } from "@/stores/document-metadata";
 import { exportValidatedAst, type ExportResult } from "./export-ast";
 
@@ -27,29 +28,30 @@ export function ExportAstButton({ getEditorJson }: { getEditorJson: () => unknow
 
   return (
     <div>
-      <button
-        onClick={handleExport}
-        className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-600 hover:bg-gray-100"
-      >
+      <Button variant="secondary" onClick={handleExport} className="w-full">
         导出 AST
-      </button>
+      </Button>
 
       {result?.success && (
-        <div className="mt-2">
-          {copyState === "ok" && <p className="text-xs text-green-600">已复制 AST JSON</p>}
-          {copyState === "failed" && (
-            <p className="text-xs text-amber-600">复制失败,请手动复制</p>
+        <div className="mt-[10px]">
+          {copyState === "ok" && (
+            <p className="text-[12px] text-[var(--color-accent-700)]">已复制 AST JSON</p>
           )}
-          <pre className="mt-1 max-h-64 overflow-auto rounded bg-gray-50 p-2 text-xs">
+          {copyState === "failed" && (
+            <p className="text-[12px] text-[var(--color-accent-2-700)]">复制失败,请手动复制</p>
+          )}
+          <pre className="mt-[6px] max-h-64 overflow-auto rounded-[var(--radius-md)] bg-[var(--color-neutral-100)] p-[8px] text-[11px]">
             {result.formatted}
           </pre>
         </div>
       )}
 
       {result && !result.success && (
-        <div className="mt-2 rounded border border-red-200 bg-red-50 p-2">
-          <p className="text-xs font-semibold text-red-700">AST 校验失败</p>
-          <ul className="mt-1 space-y-0.5 text-xs text-red-600">
+        <div className="mt-[10px] rounded-[var(--radius-md)] border border-[var(--color-accent-2-300)] bg-[var(--color-accent-2-100)] p-[8px]">
+          <p className="text-[12px] font-semibold text-[var(--color-accent-2-700)]">
+            AST 校验失败
+          </p>
+          <ul className="mt-[4px] space-y-[2px] text-[11px] text-[var(--color-accent-2-700)]">
             {result.issues.map((issue, i) => (
               <li key={i}>
                 {issue.path}: {issue.message}

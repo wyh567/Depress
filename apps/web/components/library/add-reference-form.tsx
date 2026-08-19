@@ -2,6 +2,7 @@
 
 import { CslItemTypeSchema } from "@depress/ast";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { useReferenceLibrary } from "@/stores/reference-library";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -14,7 +15,46 @@ const TYPE_LABELS: Record<string, string> = {
   document: "Other document",
 };
 
-export function AddReferenceForm() {
+// Broadsheet visual pass (T-06 Slice 6A). Presentation only — every prop,
+// aria-label, field, validation rule, and store call below is unchanged
+// from the pre-Slice-6A version: same citeKey/type/title/author/year
+// fields, same submit/duplicate/error handling, same
+// mutation !== "idle" disabled semantics.
+const LABEL_CLASS =
+  "flex flex-col gap-[4px] text-[10px] tracking-[.1em] text-[var(--color-neutral-500)] uppercase";
+// No `outline-none` here at all — verified live (via CSSOM/computed-style
+// inspection) that applying it in ANY form (bare or `focus:`-conditioned)
+// permanently pins Tailwind v4's shared `--tw-outline-style` custom
+// property to "none", and `outline-2`/`focus-visible:outline-2` only ever
+// sets `outline-width` — it reads `outline-style` from that same
+// property rather than resetting it, so the ring never renders once
+// `outline-none` has touched the element, conditioned or not. Tailwind's
+// own default for `--tw-outline-style` is already "solid", and
+// `outline-width` has no visible value until `focus-visible:outline-2`
+// sets it, so no reset class is needed at all: at rest there is
+// legitimately no width to show, and on focus-visible the ring renders
+// correctly.
+const FOCUS_RING =
+  "focus-visible:outline-2 focus-visible:outline-[color:var(--color-accent)] focus-visible:outline-offset-2";
+const CONTROL_CLASS =
+  `w-full rounded-[var(--radius-md)] border border-[var(--color-neutral-300)] bg-[var(--color-bg)] px-[9px] py-[7px] text-[13px] normal-case tracking-normal text-[var(--color-text)] transition-colors ${FOCUS_RING}`;
+
+// T-06 Slice 9A: `accessibleLabelPrefix` exists solely to disambiguate this
+// form's accessible names when two instances are simultaneously mounted —
+// the Editor's always-mounted copy (inside LibraryPanel, CSS-hidden
+// whenever another top-level view is active, never unmounted so its draft
+// survives) and the dedicated References view's own copy. Default
+// `undefined` leaves every aria-label exactly as it was before this slice
+// (the Editor instance, and every existing test asserting these labels).
+// When provided, it is prepended directly into the aria-label string —
+// not into any visible text — so the rendered UI is pixel-identical
+// either way.
+export function AddReferenceForm({
+  accessibleLabelPrefix,
+}: { accessibleLabelPrefix?: string } = {}) {
+  const label = (text: string) =>
+    accessibleLabelPrefix ? `${accessibleLabelPrefix} ${text}` : text;
+
   const createReference = useReferenceLibrary((state) => state.create);
   const mutation = useReferenceLibrary((state) => state.mutation);
   const [id, setId] = useState("");
@@ -57,25 +97,76 @@ export function AddReferenceForm() {
     }
   };
 
-  const inputClass =
-    "w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none";
-
   return (
-    <div className="space-y-2 border-b border-gray-200 p-3">
-      <p className="text-xs font-semibold text-gray-500">Add reference manually</p>
-      <input aria-label="citeKey" value={id} onChange={(event) => setId(event.target.value)} className={inputClass} />
-      <select aria-label="Reference type" value={type} onChange={(event) => setType(event.target.value)} className={inputClass}>
-        {CslItemTypeSchema.options.map((candidate) => (
-          <option key={candidate} value={candidate}>{TYPE_LABELS[candidate]}</option>
-        ))}
-      </select>
-      <input aria-label="Reference title" value={title} onChange={(event) => setTitle(event.target.value)} className={inputClass} />
-      <input aria-label="Reference author" value={author} onChange={(event) => setAuthor(event.target.value)} className={inputClass} />
-      <input aria-label="Reference year" value={year} onChange={(event) => setYear(event.target.value)} className={inputClass} />
-      {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
-      <button type="button" onClick={() => void submit()} disabled={mutation !== "idle"} className="w-full rounded bg-blue-600 py-1.5 text-sm text-white">
+    <div className="flex flex-col gap-[8px] border-b border-[var(--color-divider)] p-[12px]">
+      <p className="m-0 text-[10px] tracking-[.14em] text-[var(--color-neutral-500)] uppercase">
+        Add reference manually
+      </p>
+      <label className={LABEL_CLASS}>
+        citeKey
+        <input
+          aria-label={label("citeKey")}
+          value={id}
+          onChange={(event) => setId(event.target.value)}
+          className={CONTROL_CLASS}
+        />
+      </label>
+      <label className={LABEL_CLASS}>
+        Type
+        <select
+          aria-label={label("Reference type")}
+          value={type}
+          onChange={(event) => setType(event.target.value)}
+          className={CONTROL_CLASS}
+        >
+          {CslItemTypeSchema.options.map((candidate) => (
+            <option key={candidate} value={candidate}>
+              {TYPE_LABELS[candidate]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className={LABEL_CLASS}>
+        Title
+        <input
+          aria-label={label("Reference title")}
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          className={CONTROL_CLASS}
+        />
+      </label>
+      <label className={LABEL_CLASS}>
+        Author
+        <input
+          aria-label={label("Reference author")}
+          value={author}
+          onChange={(event) => setAuthor(event.target.value)}
+          className={CONTROL_CLASS}
+        />
+      </label>
+      <label className={LABEL_CLASS}>
+        Year
+        <input
+          aria-label={label("Reference year")}
+          value={year}
+          onChange={(event) => setYear(event.target.value)}
+          className={CONTROL_CLASS}
+        />
+      </label>
+      {error && (
+        <p role="alert" className="m-0 text-[12px] text-[var(--color-accent-2-700)]">
+          {error}
+        </p>
+      )}
+      <Button
+        variant="primary"
+        onClick={() => void submit()}
+        disabled={mutation !== "idle"}
+        className="w-full"
+        {...(accessibleLabelPrefix ? { "aria-label": label("Add reference") } : {})}
+      >
         Add reference
-      </button>
+      </Button>
     </div>
   );
 }
