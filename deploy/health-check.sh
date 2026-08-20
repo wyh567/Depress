@@ -85,8 +85,16 @@ assert_status legacy-compile-hidden 404 "${legacy_status}"
 if [[ "${HEALTH_SKIP_BAD_HOST}" != "1" ]]; then
   # Deliberately CURL_BASE_ARGS, not CURL_ARGS: this must be the ONLY Host
   # header on this request. See the CURL_BASE_ARGS comment above.
+  # curl can fail at the transport level (e.g. exit 56) when nginx rejects
+  # an unrecognized Host during the TLS handshake -- that is an *expected*
+  # outcome for this probe, not a script error. Without `|| true` here,
+  # `set -euo pipefail` would abort the script on that non-zero exit before
+  # the explicit 000/4xx contract below ever gets evaluated. This does not
+  # change what counts as a passing result: bad_host_status must still be
+  # exactly "000" or match ^4[0-9][0-9]$, checked immediately below.
   bad_host_status=$(curl "${CURL_BASE_ARGS[@]}" --header 'Host: depress-internal.invalid' \
-    -o /dev/null -w '%{http_code}' "${HEALTH_ORIGIN}/")
+    -o /dev/null -w '%{http_code}' "${HEALTH_ORIGIN}/" \
+    || true)
   [[ "${bad_host_status}" == "000" || "${bad_host_status}" =~ ^4[0-9][0-9]$ ]] || {
     echo "health check failed: unknown host status=${bad_host_status}" >&2
     exit 1

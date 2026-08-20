@@ -42,7 +42,11 @@ if (( ${#host_headers[@]} > 1 )); then
   # of how many Host headers were actually sent.
   code=200
 elif (( ${#host_headers[@]} == 1 )) && [[ "${host_headers[0]}" == 'Host: depress-internal.invalid' ]]; then
-  code=000
+  if [[ "${FAKE_BADHOST_EMPTY:-0}" == "1" ]]; then
+    code=""
+  else
+    code="${FAKE_BADHOST_CODE:-000}"
+  fi
 elif [[ "$url" == */api/internal/health-probe || "$url" == */compile ]]; then
   code=404
 fi
@@ -52,6 +56,17 @@ if [[ -n "$output" ]]; then
   else
     : > "$output"
   fi
+fi
+# T-06F: let tests model a bad-host probe that fails at the transport
+# level (curl exit 56 on an SSL EOF) or otherwise misbehaves, the same
+# way real nginx unknown-Host rejection can. Only ever applies to the
+# single, isolated unknown-Host request -- every other request on this
+# fake curl keeps its normal exit-0 behavior.
+if (( ${#host_headers[@]} == 1 )) && [[ "${host_headers[0]}" == 'Host: depress-internal.invalid' ]] && [[ -n "${FAKE_BADHOST_EXIT:-}" ]]; then
+  if [[ -n "$format" ]]; then
+    printf '%s' "$code"
+  fi
+  exit "${FAKE_BADHOST_EXIT}"
 fi
 if [[ -n "$format" ]]; then
   printf '%s' "$code"
@@ -99,3 +114,57 @@ PATH="${SANDBOX}/bin:${PATH}" \
 
 echo "PASS: health check covers Web root/static, same-origin API, private routes, and release state"
 echo "PASS: health check's bad-host request sends exactly one Host header (no leakage from CURL_ARGS)"
+# --- T-06F regression -----------------------------------------------------
+# A bad-host probe that fails at the transport level (curl exit 56, the same
+# SSL EOF nginx produces when it rejects an unrecognized Host) must NOT abort
+# health-check.sh before the existing 000/4xx contract check runs. With the
+# fix, the overall health check must still PASS in this scenario, because
+# "000" remains an accepted result for this probe.
+FAKE_BADHOST_EXIT=56 \
+  PATH="${SANDBOX}/bin:${PATH}" \
+  HEALTH_ORIGIN=https://127.0.0.1:18443 \
+  HEALTH_HOST_HEADER=de-press.xyz \
+  DEPRESS_ROOT="${SANDBOX}/depress" \
+  bash "${SCRIPT_DIR}/health-check.sh"
+echo "PASS: health check tolerates bad-host curl exit 56 (SSL EOF, body 000) and still enforces the 000/4xx contract"
+
+# --- T-06F negative: bad-host probe returns 200, exit 0 -------------------
+# Prove the fix does not weaken the security contract: an unknown Host that
+# is unexpectedly served (200) must still fail the health check.
+if FAKE_BADHOST_CODE=200 \
+  PATH="${SANDBOX}/bin:${PATH}" \
+  HEALTH_ORIGIN=https://127.0.0.1:18443 \
+  HEALTH_HOST_HEADER=de-press.xyz \
+  DEPRESS_ROOT="${SANDBOX}/depress" \
+  bash "${SCRIPT_DIR}/health-check.sh"; then
+  echo "FAIL: health check must FAIL when the unknown-Host probe returns 200 (unknown host must be rejected, not served)" >&2
+  exit 1
+fi
+echo "PASS: health check correctly fails when bad-host probe returns 200"
+
+# --- T-06F negative: bad-host probe returns 500, exit 0 -------------------
+if FAKE_BADHOST_CODE=500 \
+  PATH="${SANDBOX}/bin:${PATH}" \
+  HEALTH_ORIGIN=https://127.0.0.1:18443 \
+  HEALTH_HOST_HEADER=de-press.xyz \
+  DEPRESS_ROOT="${SANDBOX}/depress" \
+  bash "${SCRIPT_DIR}/health-check.sh"; then
+  echo "FAIL: health check must FAIL when the unknown-Host probe returns 500 (not an accepted 000/4xx result)" >&2
+  exit 1
+fi
+echo "PASS: health check correctly fails when bad-host probe returns 500"
+
+# --- T-06F negative: bad-host probe yields empty output, non-zero exit ----
+# Proves the `|| true` fix does not swallow every curl failure into a PASS:
+# an empty status string (unmatched by "000" or ^4[0-9][0-9]$) must still
+# fail the health check even though the curl call itself is tolerated.
+if FAKE_BADHOST_EMPTY=1 FAKE_BADHOST_EXIT=7 \
+  PATH="${SANDBOX}/bin:${PATH}" \
+  HEALTH_ORIGIN=https://127.0.0.1:18443 \
+  HEALTH_HOST_HEADER=de-press.xyz \
+  DEPRESS_ROOT="${SANDBOX}/depress" \
+  bash "${SCRIPT_DIR}/health-check.sh"; then
+  echo "FAIL: health check must FAIL when the bad-host probe yields empty output on failure (curl failure must not be silently accepted)" >&2
+  exit 1
+fi
+echo "PASS: health check correctly fails when bad-host probe yields empty output on a non-zero, non-56 exit"
