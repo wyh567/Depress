@@ -139,6 +139,27 @@ run_release() {
     bash "${RELEASE_SCRIPT}" "${CASE_REPO}" "${CASE_SHA}"
 }
 
+run_release_with_default_max() {
+  local retry_interval=$1
+
+  DEPRESS_ROOT="${CASE_ROOT}" \
+    DEPRESS_RELEASE_GROUP="$RELEASE_GROUP" \
+    DEPRESS_WEB_USER="${TEST_USERS[0]}" DEPRESS_WEB_GROUP="${TEST_GROUPS[0]}" \
+    DEPRESS_API_USER="${TEST_USERS[1]}" DEPRESS_API_GROUP="${TEST_GROUPS[1]}" \
+    DEPRESS_OUTBOX_USER="${TEST_USERS[2]}" DEPRESS_OUTBOX_GROUP="${TEST_GROUPS[2]}" \
+    DEPRESS_WORKER_USER="${TEST_USERS[3]}" DEPRESS_WORKER_GROUP="${TEST_GROUPS[3]}" \
+    DEPRESS_MIGRATION_USER="${TEST_USERS[4]}" DEPRESS_MIGRATION_GROUP="${TEST_GROUPS[4]}" \
+    DEPRESS_CLEANUP_USER="${TEST_USERS[5]}" DEPRESS_CLEANUP_GROUP="${TEST_GROUPS[5]}" \
+    SYSTEMCTL_BIN="${FAKE_SYSTEMCTL}" \
+    COREPACK_BIN="${FAKE_COREPACK}" \
+    HEALTH_CHECK_BIN="${FAKE_HEALTH}" \
+    HEALTH_ATTEMPT_LOG="${HEALTH_ATTEMPT_LOG}" \
+    HEALTH_FAIL_COUNT_FILE="${HEALTH_FAIL_COUNT_FILE}" \
+    HEALTH_CHECK_RETRY_INTERVAL_SECONDS="${retry_interval}" \
+    DEPRESS_API_ORIGIN=http://127.0.0.1:3001 \
+    bash "${RELEASE_SCRIPT}" "${CASE_REPO}" "${CASE_SHA}"
+}
+
 # ---- D: immediate success — no unnecessary retry/sleep ----
 new_case immediate-success
 printf '%s' 0 > "${HEALTH_FAIL_COUNT_FILE}"
@@ -183,5 +204,39 @@ fi
 grep -q "failed after 3/3 attempts" "${SANDBOX}/persistent-failure.log" ||
   fail "persistent failure case did not log the final bounded-retry failure"
 pass "persistent health-check failure retries exactly up to the configured maximum, then rolls back current/previous"
+
+# ---- E: default budget accommodates a slow-starting API (13th attempt) ----
+new_case default-budget-eventual-success
+printf '%s' 12 > "${HEALTH_FAIL_COUNT_FILE}"
+run_release_with_default_max 0.01 >"${SANDBOX}/default-budget-eventual-success.log" 2>&1 ||
+  fail "default-budget eventual success was rejected: $(cat "${SANDBOX}/default-budget-eventual-success.log")"
+[[ "$(attempt_count)" == "13" ]] ||
+  fail "default-budget eventual success case made $(attempt_count) health check attempts, expected exactly 13"
+[[ $(readlink -f "${CASE_ROOT}/current") == "${CASE_ROOT}/releases/${CASE_SHA}" ]] ||
+  fail "default-budget eventual success case did not activate the new release after eventual success"
+grep -q "succeeded on attempt 13/30" "${SANDBOX}/default-budget-eventual-success.log" ||
+  fail "default-budget eventual success case did not log the eventual success attempt number against the default max"
+pass "default HEALTH_CHECK_MAX_ATTEMPTS (unset, falls back to 30) tolerates 12 failures before a 13th-attempt success, activating the release with no rollback"
+
+# ---- F: default budget is still bounded — persistent failure rolls back at attempt 30 ----
+new_case default-budget-persistent-failure
+printf '%s' 999 > "${HEALTH_FAIL_COUNT_FILE}"
+CURRENT_RELEASE="${CASE_ROOT}/releases/current-old"
+PREVIOUS_RELEASE="${CASE_ROOT}/releases/previous-old"
+mkdir -p "${CASE_ROOT}" "${CURRENT_RELEASE}" "${PREVIOUS_RELEASE}"
+ln -s "${CURRENT_RELEASE}" "${CASE_ROOT}/current"
+ln -s "${PREVIOUS_RELEASE}" "${CASE_ROOT}/previous"
+if run_release_with_default_max 0.01 >"${SANDBOX}/default-budget-persistent-failure.log" 2>&1; then
+  fail "default-budget persistent failure was accepted"
+fi
+[[ "$(attempt_count)" == "30" ]] ||
+  fail "default-budget persistent failure case made $(attempt_count) health check attempts, expected exactly 30 (the default maximum)"
+[[ $(readlink -f "${CASE_ROOT}/current") == "${CURRENT_RELEASE}" ]] ||
+  fail "default-budget persistent failure case did not restore current"
+[[ $(readlink -f "${CASE_ROOT}/previous") == "${PREVIOUS_RELEASE}" ]] ||
+  fail "default-budget persistent failure case did not restore previous"
+grep -q "failed after 30/30 attempts" "${SANDBOX}/default-budget-persistent-failure.log" ||
+  fail "default-budget persistent failure case did not log the final bounded-retry failure at the default maximum"
+pass "default HEALTH_CHECK_MAX_ATTEMPTS (unset, falls back to 30) is still bounded: persistent failure retries exactly 30 times, then rolls back current/previous"
 
 echo "all release readiness tests passed"

@@ -193,7 +193,14 @@ run_release_health_check() {
   # deterministic number of times with a fixed interval; the same
   # health-check.sh remains the sole authority on "healthy" — this loop
   # only decides how long to keep asking it before giving up.
-  local max_attempts=${HEALTH_CHECK_MAX_ATTEMPTS:-10}
+  #
+  # Production observation: a Type=simple restart returning does not mean
+  # the listener is ready. The API's normal cold start is ~12-14s. The
+  # default below gives that cold start a bounded startup margin while
+  # still failing (and rolling back) a persistently broken release in
+  # well under a minute. Both values remain overridable via
+  # HEALTH_CHECK_MAX_ATTEMPTS / HEALTH_CHECK_RETRY_INTERVAL_SECONDS.
+  local max_attempts=${HEALTH_CHECK_MAX_ATTEMPTS:-30}
   local retry_interval=${HEALTH_CHECK_RETRY_INTERVAL_SECONDS:-1}
   local attempt=1
   while true; do
