@@ -3,6 +3,7 @@
 import type {
   CompileJobCreateRequest,
   CompileTemplateId,
+  PersistedCompileJobResource,
   PersistedCompileJobStatus,
 } from "@depress/ast";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -11,6 +12,12 @@ import {
   type CompileJobApiClient,
 } from "@/lib/compile-job-client";
 import type { DocumentSaveState } from "./editor-area";
+import {
+  clearCompileSessionJobId,
+  readCompileSessionJobId,
+  writeCompileSessionJobId,
+  type CompileSessionIdentity,
+} from "./compile-session-storage";
 
 // T-06 Slice 7A: the revision-scoped compile state machine extracted out of
 // `compile-controls.tsx`'s `CompileControlsForRevision`, mechanically and
@@ -66,10 +73,31 @@ function safeMessage(error: unknown): string {
     : "The compile service is unavailable. Try again.";
 }
 
+// T-07 (P2-04): the only thing ever written down about a finished compile is
+// its job id, filed under the exact identity it belongs to. Nothing is trusted
+// on the way back in -- see the rehydration effect below.
+function rememberSucceededJob(job: PersistedCompileJobResource): void {
+  if (job.status !== "succeeded" || job.format !== "pdf") return;
+  writeCompileSessionJobId(
+    {
+      documentId: job.documentId,
+      revision: job.revision,
+      templateId: job.templateId,
+      format: "pdf",
+    },
+    job.jobId,
+  );
+}
+
 interface ActiveRequest {
   generation: number;
   documentId?: string;
   revision?: number;
+  // T-07 (P1-01): templateId is part of a compile job's identity, so it has to
+  // be part of the request identity too. Without it a job created under one
+  // template stayed "current" after the template changed, which is exactly what
+  // kept a stale artifact pollable and downloadable.
+  templateId?: CompileTemplateId;
   jobId?: string;
 }
 
@@ -153,10 +181,11 @@ export function useCompileJobSession({
         request.generation === current.generation &&
         request.documentId === activeDocumentId &&
         request.revision === activeRevision &&
+        request.templateId === selectedTemplateId &&
         request.jobId === current.jobId
       );
     },
-    [activeDocumentId, activeRevision],
+    [activeDocumentId, activeRevision, selectedTemplateId],
   );
 
   const poll = useCallback(
@@ -175,7 +204,8 @@ export function useCompileJobSession({
           if (
             job.jobId !== request.jobId ||
             job.documentId !== request.documentId ||
-            job.revision !== request.revision
+            job.revision !== request.revision ||
+            job.templateId !== request.templateId
           ) {
             setCompileError("The compile service returned an invalid job.");
             setPolling(false);
@@ -191,6 +221,7 @@ export function useCompileJobSession({
           if (job.status === "succeeded") {
             setCompileError(undefined);
             setPolling(false);
+            rememberSucceededJob(job);
             return;
           }
         } catch (error) {
@@ -252,6 +283,7 @@ export function useCompileJobSession({
       generation: requestGeneration,
       documentId: activeDocumentId,
       revision: activeRevision,
+      templateId: selectedTemplateId,
     };
     activeRequest.current = requestIdentity;
     setActiveCompileJobId(undefined);
@@ -269,7 +301,8 @@ export function useCompileJobSession({
         requestGeneration !== generation.current ||
         activeRequest.current.generation !== requestGeneration ||
         activeDocumentId !== created.documentId ||
-        activeRevision !== created.revision
+        activeRevision !== created.revision ||
+        selectedTemplateId !== created.templateId
       ) {
         return;
       }
@@ -286,7 +319,10 @@ export function useCompileJobSession({
         setCompileError("PDF compilation failed. Try compiling again.");
         return;
       }
-      if (created.status === "succeeded") return;
+      if (created.status === "succeeded") {
+        rememberSucceededJob(created);
+        return;
+      }
       setPolling(true);
       void poll(persistedRequest, nextController.signal);
     } catch (error) {
@@ -310,6 +346,72 @@ export function useCompileJobSession({
     saveState,
     selectedTemplateId,
   ]);
+
+  // T-07 (P2-04): restore the most recent succeeded output for exactly this
+  // paper + revision + template + format when the session mounts, so a reload
+  // no longer reports "No PDF output for this revision yet" for work the server
+  // has already finished. Only an opaque job id was ever stored: the job itself
+  // is re-read through the owner-authorized API and every identity field is
+  // re-checked below, so an entry belonging to another template, revision, or
+  // paper can never be adopted -- it is dropped and the entry is cleared.
+  useEffect(() => {
+    if (activeDocumentId === undefined || activeRevision === undefined) return;
+    const identity: CompileSessionIdentity = {
+      documentId: activeDocumentId,
+      revision: activeRevision,
+      templateId: selectedTemplateId,
+      format: "pdf",
+    };
+    const storedJobId = readCompileSessionJobId(identity);
+    if (storedJobId === undefined) return;
+    const rehydrationGeneration = ++generation.current;
+    const rehydrationController = new AbortController();
+    controller.current?.abort();
+    controller.current = rehydrationController;
+    activeRequest.current = {
+      generation: rehydrationGeneration,
+      documentId: identity.documentId,
+      revision: identity.revision,
+      templateId: identity.templateId,
+      jobId: storedJobId,
+    };
+    const abandon = () => {
+      if (rehydrationGeneration !== generation.current) return;
+      activeRequest.current = { generation: rehydrationGeneration };
+    };
+    void (async () => {
+      try {
+        const restored = await client.getCompileJob(
+          storedJobId,
+          rehydrationController.signal,
+        );
+        if (rehydrationController.signal.aborted) return;
+        if (rehydrationGeneration !== generation.current) return;
+        if (
+          restored.jobId !== storedJobId ||
+          restored.documentId !== identity.documentId ||
+          restored.revision !== identity.revision ||
+          restored.templateId !== identity.templateId ||
+          restored.format !== identity.format ||
+          restored.status !== "succeeded"
+        ) {
+          clearCompileSessionJobId(identity);
+          abandon();
+          return;
+        }
+        setActiveCompileJobId(restored.jobId);
+        setCompileStatus(restored.status);
+        setCompileError(undefined);
+      } catch {
+        // A transport failure only means there is no restored output this
+        // time. The entry is left alone so a later mount can try again.
+        if (!rehydrationController.signal.aborted) abandon();
+      }
+    })();
+    return () => {
+      rehydrationController.abort();
+    };
+  }, [activeDocumentId, activeRevision, selectedTemplateId, client]);
 
   const download = useCallback(async () => {
     if (compileStatus !== "succeeded" || !activeCompileJobId) return;

@@ -306,6 +306,60 @@ describe("manual document save and reopen workspace", () => {
     expect(editorHarness.json()).toEqual(supportedEnvelope.editor);
   });
 
+  it("keeps dirty manuscript when a sidebar document switch is cancelled", async () => {
+    const confirmDiscard = vi.fn(() => false);
+    const client = clientWith({
+      listDocuments: vi.fn().mockResolvedValue([
+        { id: ID_A, title: "First", revision: 1, updatedAt: CREATED_AT },
+        { id: ID_B, title: "Second", revision: 1, updatedAt: CREATED_AT },
+      ]),
+      getDocument: vi
+        .fn()
+        .mockImplementation((id: string) => Promise.resolve(resource(id, 1))),
+    });
+    render(<DocumentWorkspace client={client} confirmDiscard={confirmDiscard} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^First/ }));
+    await screen.findByText("revision:1");
+    fireEvent.click(screen.getByRole("button", { name: "Edit body" }));
+    expect(screen.getByText("state:dirty")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Second/ }));
+
+    expect(confirmDiscard).toHaveBeenCalledTimes(1);
+    expect(client.getDocument).toHaveBeenCalledTimes(1);
+    expect(client.getDocument).toHaveBeenCalledWith(ID_A);
+    expect(client.getDocument).not.toHaveBeenCalledWith(ID_B);
+    expect(screen.getByText("state:dirty")).toBeInTheDocument();
+    expect(screen.getByText("revision:1")).toBeInTheDocument();
+    expect(editorHarness.json()).toEqual(supportedEnvelope.editor);
+  });
+
+  it("switches to the sidebar document after dirty manuscript discard is confirmed", async () => {
+    const confirmDiscard = vi.fn(() => true);
+    const client = clientWith({
+      listDocuments: vi.fn().mockResolvedValue([
+        { id: ID_A, title: "First", revision: 1, updatedAt: CREATED_AT },
+        { id: ID_B, title: "Second", revision: 2, updatedAt: CREATED_AT },
+      ]),
+      getDocument: vi
+        .fn()
+        .mockImplementation((id: string) => Promise.resolve(resource(id, id === ID_B ? 2 : 1))),
+    });
+    render(<DocumentWorkspace client={client} confirmDiscard={confirmDiscard} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^First/ }));
+    await screen.findByText("revision:1");
+    fireEvent.click(screen.getByRole("button", { name: "Edit body" }));
+    expect(screen.getByText("state:dirty")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Second/ }));
+
+    expect(confirmDiscard).toHaveBeenCalledTimes(1);
+    await screen.findByText("revision:2");
+    expect(client.getDocument).toHaveBeenCalledWith(ID_B);
+    expect(screen.queryByText("state:dirty")).not.toBeInTheDocument();
+    expect(screen.getByText("revision:2")).toBeInTheDocument();
+  });
+
   it("keeps B active when open A resolves after the later open B request", async () => {
     const requestA = deferred<DocumentResource>();
     const requestB = deferred<DocumentResource>();
@@ -493,6 +547,141 @@ describe("manual document save and reopen workspace", () => {
     expect(editorHarness.editor.commands.setContent).toHaveBeenLastCalledWith(
       EmptyPersistedDocumentEnvelope.editor,
       { emitUpdate: false, errorOnInvalidContent: true },
+    );
+  });
+});
+
+// T-07 (P1-02): unsaved-work protection. `mayReplaceLocalState` already guarded
+// in-app document switching for the manuscript, but nothing guarded the
+// browser's own exits, and a metadata-only draft had no coverage at all.
+describe("unsaved work protection", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    editorHarness.reset();
+    useDocumentMetadata.getState().clear();
+  });
+
+  function leavingIsBlocked(): boolean {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  }
+
+  async function openSavedDocument(client: DocumentApiClient): Promise<void> {
+    render(<DocumentWorkspace client={client} confirmDiscard={() => true} />);
+    // The sidebar's "New" stays disabled until the initial list load settles.
+    expect(await screen.findByText("No documents yet.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
+    await waitFor(() =>
+      expect(screen.getByText("state:saved")).toBeInTheDocument(),
+    );
+  }
+
+  it("lets a saved document be left without any interstitial", async () => {
+    await openSavedDocument(clientWith());
+
+    expect(leavingIsBlocked()).toBe(false);
+  });
+
+  it("blocks leaving once the manuscript is dirty", async () => {
+    await openSavedDocument(clientWith());
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit body" }));
+
+    expect(screen.getByText("state:dirty")).toBeInTheDocument();
+    expect(leavingIsBlocked()).toBe(true);
+  });
+
+  it("blocks leaving when only the metadata is dirty", async () => {
+    await openSavedDocument(clientWith());
+
+    act(() => {
+      useDocumentMetadata.getState().setField("title", "Draft title");
+    });
+
+    expect(screen.getByText("state:dirty")).toBeInTheDocument();
+    expect(leavingIsBlocked()).toBe(true);
+  });
+
+  it("stops blocking once the save succeeds", async () => {
+    await openSavedDocument(clientWith());
+    fireEvent.click(screen.getByRole("button", { name: "Edit body" }));
+    expect(leavingIsBlocked()).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(screen.getByText("state:saved")).toBeInTheDocument(),
+    );
+
+    expect(leavingIsBlocked()).toBe(false);
+  });
+
+  it("blocks leaving while a save is in flight", async () => {
+    const request = deferred<DocumentResource>();
+    const client = clientWith({
+      updateDocument: vi.fn(() => request.promise),
+    });
+    await openSavedDocument(client);
+    fireEvent.click(screen.getByRole("button", { name: "Edit body" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(screen.getByText("state:saving")).toBeInTheDocument(),
+    );
+    expect(leavingIsBlocked()).toBe(true);
+
+    request.resolve(resource(ID_A, 2, supportedEnvelope));
+    await waitFor(() =>
+      expect(screen.getByText("state:saved")).toBeInTheDocument(),
+    );
+    expect(leavingIsBlocked()).toBe(false);
+  });
+
+  it("keeps blocking when the save fails", async () => {
+    const client = clientWith({
+      updateDocument: vi.fn().mockRejectedValue(new Error("network down")),
+    });
+    await openSavedDocument(client);
+    fireEvent.click(screen.getByRole("button", { name: "Edit body" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(screen.getByText("state:failed")).toBeInTheDocument(),
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Local changes retained",
+    );
+    expect(leavingIsBlocked()).toBe(true);
+  });
+
+  it("guards a metadata-only draft against replacing the open document", async () => {
+    const confirmDiscard = vi.fn(() => false);
+    const client = clientWith();
+    render(
+      <DocumentWorkspace client={client} confirmDiscard={confirmDiscard} />,
+    );
+    expect(await screen.findByText("No documents yet.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
+    await waitFor(() =>
+      expect(screen.getByText("state:saved")).toBeInTheDocument(),
+    );
+    act(() => {
+      useDocumentMetadata.getState().setField("abstract", "Draft abstract");
+    });
+    expect(screen.getByText("state:dirty")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
+
+    expect(confirmDiscard).toHaveBeenCalledTimes(1);
+    expect(client.createDocument).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("state:dirty")).toBeInTheDocument();
+
+    confirmDiscard.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
+
+    await waitFor(() =>
+      expect(client.createDocument).toHaveBeenCalledTimes(2),
     );
   });
 });

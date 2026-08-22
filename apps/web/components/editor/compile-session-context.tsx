@@ -137,7 +137,15 @@ export function CompileSessionProvider({
     undefined,
   );
 
-  const currentKey = `${documentId ?? "none"}:${revision ?? "none"}`;
+  // T-07 (P1-01): a compile session is identified by the paper, the revision
+  // AND the selected template. Leaving templateId out of this key is what let a
+  // succeeded GB/T job survive a switch to IEEE and stay downloadable. Widening
+  // the key deliberately reuses the existing keyed-remount invalidation instead
+  // of adding a second, parallel reset path: `selectedTemplateId` still lives on
+  // the stable provider above the boundary, so changing template clears the
+  // compile state while the selection itself survives -- the same asymmetry the
+  // revision path already depends on.
+  const currentKey = `${documentId ?? "none"}:${revision ?? "none"}:${selectedTemplateId}`;
   const contextValue: CompileSessionState =
     reported && reported.key === currentKey
       ? { status: "ready", ...reported.session }
