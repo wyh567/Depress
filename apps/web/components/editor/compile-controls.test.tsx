@@ -70,6 +70,10 @@ async function flush(): Promise<void> {
 describe("persisted compile controls", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    // T-07 (P2-04): a succeeded job now files its id under its own identity, so
+    // every test has to start from an empty store -- otherwise an earlier
+    // test's success would rehydrate into a later one.
+    sessionStorage.clear();
   });
 
   afterEach(() => {
@@ -433,7 +437,14 @@ describe("persisted compile controls", () => {
           void resolve;
         }),
     );
-    const client = clientWith({ getCompileJob });
+    // T-07 (P1-01): the job the server hands back has to belong to the template
+    // that was actually requested, so this fake now echoes the requested
+    // template instead of always answering "ieee". Before templateId became part
+    // of the compile identity the mismatch simply went unnoticed here.
+    const createCompileJob = vi.fn((request: CompileJobCreateRequest) =>
+      Promise.resolve(job("accepted", { templateId: request.templateId })),
+    );
+    const client = clientWith({ createCompileJob, getCompileJob });
     const first = render(
       <CompileControls
         activeDocumentId={DOCUMENT_A}

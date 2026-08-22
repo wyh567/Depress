@@ -288,6 +288,32 @@ export function DocumentWorkspace({
     setSaveState(lastSafeServerEnvelope ? "dirty" : "failed");
   }, [lastSafeServerEnvelope]);
 
+  // T-07 (P1-02): `mayReplaceLocalState` already guards every in-app document
+  // switch, but nothing guarded the browser's own exits. A reload, a tab close,
+  // or a back navigation discarded an unsaved manuscript or metadata draft
+  // silently -- and this application has no autosave by design, so "silently"
+  // means "permanently". The handler is attached only while there is something
+  // to lose, which is what makes the guard self-clearing: a successful save
+  // flips `saveState` to "saved" and this effect tears it down, while a failed
+  // or conflicting save leaves the draft dirty and the guard in place.
+  useEffect(() => {
+    // T-07 (P1-02 follow-up): a save in flight is not a completed failure,
+    // but leaving mid-save loses exactly the draft a "dirty" exit would --
+    // there is no autosave to fall back on. This is checked here rather
+    // than folded into `hasUnsavedChanges` itself, so `mayReplaceLocalState`'s
+    // stronger in-app behavior during a save (silently refuse, no confirm
+    // dialog) stays exactly as it was.
+    if (!hasUnsavedChanges(saveState) && saveState !== "saving") return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, [saveState]);
+
   // T-06 Slice 5: the Editor grid below is ALWAYS rendered — `hidden`
   // (display:none) toggles its visibility only. This keeps the TipTap
   // editor instance, CompileControls' polling state/AbortControllers,
