@@ -609,11 +609,10 @@ describe("unsaved work protection", () => {
     expect(leavingIsBlocked()).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() =>
-      expect(screen.getByText("state:saved")).toBeInTheDocument(),
-    );
-
-    expect(leavingIsBlocked()).toBe(false);
+    await waitFor(() => {
+      expect(screen.getByText("state:saved")).toBeInTheDocument();
+      expect(leavingIsBlocked()).toBe(false);
+    });
   });
 
   it("blocks leaving while a save is in flight", async () => {
